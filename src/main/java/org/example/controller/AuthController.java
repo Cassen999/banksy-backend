@@ -1,8 +1,7 @@
 package org.example.controller;
 
-import org.example.model.BalanceResponse;
+import org.example.entity.User;
 import org.example.repository.UserRepository;
-import org.example.service.BalanceService;
 import org.example.util.SecurityUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -11,22 +10,29 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@RestController
-@RequestMapping("/api")
-public class BalanceController {
+import java.util.Map;
 
-    private final BalanceService balanceService;
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+
     private final UserRepository userRepository;
 
-    public BalanceController(BalanceService balanceService, UserRepository userRepository) {
-        this.balanceService = balanceService;
+    public AuthController(UserRepository userRepository) {
         this.userRepository = userRepository;
     }
 
-    @GetMapping("/balance")
-    public ResponseEntity<BalanceResponse> getBalance(@AuthenticationPrincipal OAuth2User principal) {
+    @GetMapping("/me")
+    public ResponseEntity<Map<String, Object>> me(@AuthenticationPrincipal OAuth2User principal) {
         try {
-            return ResponseEntity.ok(balanceService.getBalance(SecurityUtils.resolveUser(principal, userRepository).getId()));
+            User user = SecurityUtils.resolveUser(principal, userRepository);
+            return ResponseEntity.ok(Map.of(
+                "id", user.getId(),
+                "email", user.getEmail(),
+                "firstName", user.getFirstName(),
+                "lastName", user.getLastName(),
+                "username", user.getUsername()
+            ));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }

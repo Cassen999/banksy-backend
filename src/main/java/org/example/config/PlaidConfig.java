@@ -18,10 +18,6 @@ public class PlaidConfig {
         return getRequired("PLAID_ENVIRONMENT");
     }
 
-    public static String getAccessToken() {
-        return getRequired("PLAID_ACCESS_TOKEN");
-    }
-
     private static String getRequired(String key) {
         String value = dotenv.get(key);
         if (value == null || value.isBlank()) {
