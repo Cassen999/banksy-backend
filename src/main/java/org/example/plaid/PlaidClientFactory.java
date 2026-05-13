@@ -3,7 +3,9 @@ package org.example.plaid;
 import com.plaid.client.ApiClient;
 import com.plaid.client.request.PlaidApi;
 import org.example.config.PlaidConfig;
+import retrofit2.Response;
 
+import java.io.IOException;
 import java.util.HashMap;
 
 public class PlaidClientFactory {
@@ -27,5 +29,9 @@ public class PlaidClientFactory {
         }
 
         return apiClient.createService(PlaidApi.class);
+    }
+
+    public static String extractErrorDetail(Response<?> response) throws IOException {
+        return response.errorBody() != null ? response.errorBody().string() : "no details";
     }
 }
