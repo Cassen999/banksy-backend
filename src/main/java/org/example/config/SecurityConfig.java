@@ -23,7 +23,7 @@ public class SecurityConfig {
             .cors(cors -> {})
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/login", "/oauth2/**", "/error").permitAll()
+                .requestMatchers("/login", "/oauth2/**", "/error", "/api/auth/logout").permitAll()
                 .anyRequest().authenticated()
             )
             .oauth2Login(oauth2 -> oauth2
@@ -32,11 +32,7 @@ public class SecurityConfig {
                 )
                 .defaultSuccessUrl("/api/auth/me", true)
             )
-            .logout(logout -> logout
-                .logoutSuccessUrl("/login")
-                .invalidateHttpSession(true)
-                .deleteCookies("JSESSIONID")
-            );
+            .logout(logout -> logout.disable());
 
         return http.build();
     }
