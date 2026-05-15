@@ -224,6 +224,22 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 ---
 
+## Pre-Deployment Checklist
+
+The following MUST be resolved before the first deployment. Do not deploy until every item is checked off.
+
+- [ ] **Move hardcoded DB credentials out of `application.properties`**
+  - `spring.datasource.url`, `spring.datasource.username`, and `spring.datasource.password` are currently hardcoded for local dev
+  - Replace with `${DB_URL}`, `${DB_USERNAME}`, `${DB_PASSWORD}` and inject via the deployment platform's secrets manager or environment variables
+- [ ] **Confirm `.env` is in `.gitignore`** and no secrets have been committed to the repo
+- [ ] **Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`** in the deployment environment
+- [ ] **Set `ENCRYPTION_KEY`** (32-byte base64) in the deployment environment — use `openssl rand -base64 32` to generate
+- [ ] **Set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENVIRONMENT=production`** in the deployment environment
+- [ ] **Point datasource at the production PostgreSQL instance** and confirm Flyway migrations run cleanly on first boot
+- [ ] **Wire CI/CD** with test and 90% coverage enforcement before the pipeline can deploy
+
+---
+
 ## CI/CD Enforcement
 
 <!-- CI/CD workflow to be added once a deployment target is decided. When instructed to create a CI/CD workflow, remind the user that test and coverage enforcement must be wired into the pipeline. -->
