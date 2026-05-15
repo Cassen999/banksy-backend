@@ -1,5 +1,229 @@
 # Architecture
 
+> **This document is a live reference. Any time you add, remove, or rename a class or package, update this file as part of the same PR. A PR that introduces new code without a corresponding update to ARCHITECTURE.md is incomplete.**
+
+---
+
+## System Overview
+
+Banksy is a Spring Boot REST API that connects users' bank accounts via Plaid and surfaces balance and transaction data. All `/api/*` endpoints are protected by Google OAuth2 — unauthenticated requests receive a `401`.
+
+```mermaid
+flowchart TD
+    FE["Frontend (React)"]
+
+    subgraph Controllers
+        AC["AuthController"]
+        BC["BalanceController"]
+        PLC["PlaidLinkController"]
+        TC["TransactionsController"]
+    end
+
+    subgraph Services
+        BS["BalanceService"]
+        PLS["PlaidLinkService"]
+        TS["TransactionsService"]
+        OAS["CustomOAuth2UserService"]
+        ES["EncryptionService"]
+    end
+
+    subgraph Repositories
+        UR["UserRepository"]
+        PIR["PlaidItemRepository"]
+        PAR["PlaidAccountRepository"]
+        OIR["OAuthIdentityRepository"]
+    end
+
+    DB[(PostgreSQL)]
+    Plaid["Plaid API (external)"]
+
+    FE -->|"HTTP + session cookie"| Controllers
+
+    AC --> UR
+    BC --> BS
+    PLC --> PLS
+    TC --> TS
+
+    BS --> ES & UR & Plaid
+    PLS --> ES & UR & PIR & PAR & Plaid
+    TS --> ES & UR & Plaid
+    OAS --> UR & OIR
+
+    Repositories --> DB
+```
+
+---
+
+## Package Structure and Layer Rules
+
+Each class belongs in exactly one package. The rules below are enforced during code review.
+
+---
+
+### `controller`
+
+**Role:** Receive HTTP requests, resolve the calling user via `SecurityUtils.resolveUser()`, and delegate to a service. Return a `ResponseEntity`.
+
+**Rules:**
+- MAY call one service and/or `UserRepository` (only for user resolution).
+- MAY NOT call other repositories directly — all data access beyond user resolution belongs in a service.
+- MAY NOT contain business logic. If you are writing an `if` that is not about HTTP status codes, it belongs in a service.
+- All endpoints MUST be under `/api/**`.
+
+**Classes:**
+
+| Class | Route(s) | What it does |
+|---|---|---|
+| `AuthController` | `POST /api/auth/logout`, `GET /api/auth/me` | Handles session logout and returns the current user's profile (id, email, name, username). |
+| `BalanceController` | `GET /api/balance` | Resolves the current user and delegates to `BalanceService`. |
+| `PlaidLinkController` | `GET /api/plaid/link-token`, `POST /api/plaid/exchange`, `POST /api/plaid/share` | Manages the Plaid Link flow: generates a link token, exchanges a public token for a stored access token, and shares a bank connection with another user by email. Also defines the `ExchangeRequest` and `ShareRequest` request-body records. |
+| `TransactionsController` | `GET /api/transactions` | Resolves the current user and delegates to `TransactionsService` with an optional `days` query parameter (defaults to 30). |
+
+---
+
+### `service`
+
+**Role:** Contain all business logic. Orchestrate calls to repositories, external APIs (Plaid), and other services.
+
+**Rules:**
+- MAY call any repository.
+- MAY call the Plaid API via the injected `PlaidApi` bean.
+- MAY call other services (e.g. `EncryptionService`).
+- MAY NOT handle HTTP concerns (`HttpServletRequest`, `ResponseEntity`, HTTP status codes). That is the controller's job.
+- MAY NOT resolve the current user from an `OAuth2User` principal — receive `userId` (UUID) as a parameter from the controller instead.
+
+**Classes:**
+
+| Class | What it does |
+|---|---|
+| `BalanceService` | Fetches account balances from Plaid for all `PlaidItem`s linked to a user. Decrypts each access token via `EncryptionService` before calling Plaid. |
+| `TransactionsService` | Fetches transactions from Plaid across all of a user's linked items for a given date range. Decrypts access tokens before each Plaid call. |
+| `PlaidLinkService` | Orchestrates the full Plaid Link lifecycle: creates link tokens, exchanges public tokens for access tokens (encrypting them before storage), persists `PlaidItem` and `PlaidAccount` records, and shares an item with another user. |
+| `CustomOAuth2UserService` | Extends Spring's `OidcUserService`. On each login, looks up or creates the `User` and `OAuthIdentity` records for the authenticated provider identity. |
+| `EncryptionService` | Encrypts and decrypts strings using AES-256-GCM. Used to store Plaid access tokens at rest. The secret key is read from the `ENCRYPTION_KEY` environment variable at startup. |
+
+---
+
+### `repository`
+
+**Role:** Database access only. No logic beyond what Spring Data JPA provides. Custom `@Query` methods are allowed for fetch joins.
+
+**Rules:**
+- MAY only interact with its own entity type (and eagerly fetched associations declared in the entity).
+- MAY NOT call other repositories.
+- MAY NOT contain business logic.
+- New repositories MUST extend `JpaRepository<Entity, UUID>`.
+
+**Classes:**
+
+| Class | Entity | Notable methods |
+|---|---|---|
+| `UserRepository` | `User` | `findByEmail()` — email-based lookup used during OAuth login. `findByIdWithPlaidItems()` — fetch join that loads `PlaidItem`s in one query to avoid N+1 issues. |
+| `PlaidItemRepository` | `PlaidItem` | `findByItemId()` — looks up a bank connection by Plaid's own item ID to prevent duplicate items on re-link. |
+| `PlaidAccountRepository` | `PlaidAccount` | `existsByPlaidAccountId()` — deduplication check before persisting a new account. |
+| `OAuthIdentityRepository` | `OAuthIdentity` | `findByProviderAndProviderUserId()` — detects returning users during the OAuth login flow. |
+
+---
+
+### `entity`
+
+**Role:** JPA-mapped classes that represent database tables. Together with the Flyway migration scripts, these are the source of truth for the database schema.
+
+**Rules:**
+- MAY NOT contain business logic. `@PrePersist` / `@PreUpdate` lifecycle methods for managing timestamps are the only allowed exception.
+- All primary keys MUST be `UUID` generated by the database (`GenerationType.UUID`).
+- Every new entity MUST have a corresponding Flyway migration in `src/main/resources/db/migration/`.
+
+**Classes:**
+
+| Class | Table | What it represents |
+|---|---|---|
+| `User` | `users` | An application user. Has a many-to-many relationship with `PlaidItem` via the `user_plaid_items` join table. |
+| `OAuthIdentity` | `oauth_identities` | Links a `User` to a specific OAuth provider identity (e.g. their Google account). One user can have multiple identities across providers. |
+| `PlaidItem` | `plaid_items` | A connected bank institution. Stores the AES-encrypted Plaid access token. One item can be shared across multiple users. |
+| `PlaidAccount` | `plaid_accounts` | An individual bank account within a `PlaidItem` (e.g. a checking or savings account). |
+
+---
+
+### `model`
+
+**Role:** Immutable data transfer objects (DTOs) returned as JSON response bodies. Java `record`s are value objects: all fields are set at construction time and cannot change. Jackson serializes them to JSON automatically.
+
+**Rules:**
+- MUST be Java `record`s (not classes).
+- MAY NOT carry JPA annotations or be used as database entities.
+- MAY NOT contain business logic.
+
+**Classes:**
+
+| Class | Used by | What it represents |
+|---|---|---|
+| `BalanceResponse` | `BalanceController` | Wraps a list of `Account` records, each containing name, type, subtype, current balance, available balance, and currency. |
+| `TransactionsResponse` | `TransactionsController` | Wraps a list of `Transaction` records (date, name, amount, currency, categories) plus a total count. |
+
+---
+
+### `config`
+
+**Role:** Spring `@Configuration` classes and `@Bean` definitions. Wires together the application's infrastructure.
+
+**Rules:**
+- MAY NOT contain business logic.
+- Credentials MUST be read from environment variables (via `PlaidConfig` or `EncryptionService`). They MUST NOT be hardcoded or committed.
+
+**Classes:**
+
+| Class | What it does |
+|---|---|
+| `PlaidApiConfig` | Declares the `PlaidApi` Spring bean by delegating to `PlaidClientFactory.create()`. This bean is what gets injected into services — do not instantiate `PlaidApi` directly anywhere else. |
+| `PlaidConfig` | Static helper that reads `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENVIRONMENT` from `.env`. Throws with a clear message at startup if any are missing. |
+| `SecurityConfig` | Configures Spring Security: permits `/login`, `/oauth2/**`, `/error`, and `/api/auth/logout`; requires authentication on all other requests. Wires in `CustomOAuth2UserService` for the OIDC login flow. |
+| `WebConfig` | Configures CORS to allow credentialed requests from `localhost:3000` and `localhost:5173` (React dev servers) on `GET` and `POST` methods. |
+
+---
+
+### `plaid`
+
+**Role:** Low-level Plaid SDK setup and sandbox-only utilities. Not business logic.
+
+**Rules:**
+- `PlaidClientFactory` is the only class that may construct a `PlaidApi` instance. Services MUST NOT instantiate `PlaidApi` directly.
+- `GenerateAccessToken` is a sandbox-only development utility. It MUST NOT be called from production code paths.
+
+**Classes:**
+
+| Class | What it does |
+|---|---|
+| `PlaidClientFactory` | Constructs and configures the `PlaidApi` Retrofit client from environment variables. Also provides `extractErrorDetail()` for reading Plaid error response bodies in logs. |
+| `GenerateAccessToken` | One-time sandbox utility with its own `main()`. Creates a Plaid sandbox public token and exchanges it for an access token to paste into `.env`. Not used at runtime. |
+
+---
+
+### `util`
+
+**Role:** Stateless helper methods shared across layers.
+
+**Rules:**
+- MUST be stateless (no instance fields, no Spring `@Component` / `@Service` annotation).
+- MAY NOT call repositories or services directly — dependencies must be passed as method parameters.
+
+**Classes:**
+
+| Class | What it does |
+|---|---|
+| `SecurityUtils` | Provides `resolveUser(OAuth2User, UserRepository)` — extracts the email from the OAuth principal and returns the matching `User` entity. Called by all controllers that need the current user. |
+
+---
+
+### `src/main/resources`
+
+| File / Directory | What it does |
+|---|---|
+| `application.properties` | Spring Boot configuration: datasource URL, JPA settings, OAuth2 client registration. Credentials are injected from `.env` and MUST NOT be committed. |
+| `db/migration/` | Flyway SQL migration scripts. Naming convention: `V<n>__<description>.sql`. Every new entity MUST have a migration here. Never modify an already-applied migration — add a new one instead. |
+
+---
+
 ## CI/CD Enforcement
 
 <!-- CI/CD workflow to be added once a deployment target is decided. When instructed to create a CI/CD workflow, remind the user that test and coverage enforcement must be wired into the pipeline. -->
@@ -15,6 +239,7 @@
 ## Workflow Requirements
 
 ### BEFORE Writing Code
+
 You MUST generate the following files inside `plans/<feature-name>/`:
 
 1. `plans/<feature-name>/IMPLEMENTATION_PLAN.md`
