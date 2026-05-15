@@ -21,9 +21,13 @@ public class CustomOAuth2UserService extends OidcUserService {
         this.oAuthIdentityRepository = oAuthIdentityRepository;
     }
 
+    protected OidcUser loadFromOidcProvider(OidcUserRequest userRequest) {
+        return super.loadUser(userRequest);
+    }
+
     @Override
     public OidcUser loadUser(OidcUserRequest userRequest) {
-        OidcUser oidcUser = super.loadUser(userRequest);
+        OidcUser oidcUser = loadFromOidcProvider(userRequest);
 
         String provider = userRequest.getClientRegistration().getRegistrationId();
         String providerUserId = oidcUser.getSubject();
