@@ -19,6 +19,10 @@ public class EncryptionService {
 
     private final SecretKey secretKey;
 
+    EncryptionService(SecretKey secretKey) {
+        this.secretKey = secretKey;
+    }
+
     public EncryptionService() {
         Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
         String keyBase64 = dotenv.get("ENCRYPTION_KEY");
