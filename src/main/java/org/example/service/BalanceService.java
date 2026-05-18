@@ -5,16 +5,21 @@ import com.plaid.client.model.AccountsBalanceGetRequest;
 import com.plaid.client.model.AccountsGetResponse;
 import com.plaid.client.request.PlaidApi;
 import org.example.entity.PlaidItem;
+import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.BalanceResponse;
+import org.example.model.RelinkSignal;
 import org.example.plaid.PlaidClientFactory;
+import org.example.plaid.PlaidTokenError;
 import org.example.repository.UserRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import retrofit2.Response;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -32,24 +37,42 @@ public class BalanceService {
         this.userRepository = userRepository;
     }
 
+    @Transactional
     public BalanceResponse getBalance(UUID userId) throws IOException {
         User user = userRepository.findByIdWithPlaidItems(userId).orElseThrow();
         List<BalanceResponse.Account> allAccounts = new ArrayList<>();
+        List<RelinkSignal> relinkRequired = new ArrayList<>();
 
         for (PlaidItem item : user.getPlaidItems()) {
+            if (item.getStatus() != PlaidItemStatus.HEALTHY) {
+                relinkRequired.add(RelinkSignal.from(item, userId,
+                        RelinkSignal.errorTypeFromStatus(item.getStatus())));
+                continue;
+            }
+
             String accessToken = encryptionService.decrypt(item.getAccessTokenEnc());
             Response<AccountsGetResponse> response = plaidClient
                     .accountsBalanceGet(new AccountsBalanceGetRequest().accessToken(accessToken))
                     .execute();
 
             if (!response.isSuccessful() || response.body() == null) {
-                throw new RuntimeException("Plaid balance fetch failed: " + PlaidClientFactory.extractErrorDetail(response));
+                String errorBody = PlaidClientFactory.extractErrorDetail(response);
+                Optional<PlaidTokenError> tokenError = PlaidClientFactory.classifyTokenError(errorBody);
+                if (tokenError.isPresent()) {
+                    PlaidItemStatus newStatus = tokenError.get() == PlaidTokenError.LOGIN_REQUIRED
+                            ? PlaidItemStatus.NEEDS_REAUTH
+                            : PlaidItemStatus.INVALID_TOKEN;
+                    item.setStatus(newStatus);
+                    relinkRequired.add(RelinkSignal.from(item, userId, tokenError.get()));
+                    continue;
+                }
+                throw new RuntimeException("Plaid balance fetch failed: " + errorBody);
             }
 
             response.body().getAccounts().stream().map(this::toAccount).forEach(allAccounts::add);
         }
 
-        return new BalanceResponse(allAccounts);
+        return new BalanceResponse(allAccounts, relinkRequired);
     }
 
     private BalanceResponse.Account toAccount(AccountBase account) {

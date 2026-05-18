@@ -76,7 +76,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 |---|---|---|
 | `AuthController` | `POST /api/auth/logout`, `GET /api/auth/me` | Handles session logout and returns the current user's profile (id, email, name, username). |
 | `BalanceController` | `GET /api/balance` | Resolves the current user and delegates to `BalanceService`. |
-| `PlaidLinkController` | `GET /api/plaid/link-token`, `POST /api/plaid/exchange`, `POST /api/plaid/share` | Manages the Plaid Link flow: generates a link token, exchanges a public token for a stored access token, and shares a bank connection with another user by email. Also defines the `ExchangeRequest` and `ShareRequest` request-body records. |
+| `PlaidLinkController` | `GET /api/plaid/link-token`, `GET /api/plaid/link-token/refresh/{itemId}`, `GET /api/plaid/link-token/full-relink/{itemId}`, `GET /api/plaid/status`, `POST /api/plaid/exchange`, `POST /api/plaid/share` | Manages the Plaid Link flow: generates link tokens (initial, update-mode refresh, and full-relink), exchanges a public token for a stored access token, replaces an expired item when `expiredItemId` is present in the exchange request, checks per-item health status at login time, and shares a bank connection with another user by email. Also defines the `ExchangeRequest` and `ShareRequest` request-body records. |
 | `TransactionsController` | `GET /api/transactions` | Resolves the current user and delegates to `TransactionsService` with an optional `days` query parameter (defaults to 30). |
 
 ---
@@ -96,9 +96,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | What it does |
 |---|---|
-| `BalanceService` | Fetches account balances from Plaid for all `PlaidItem`s linked to a user. Decrypts each access token via `EncryptionService` before calling Plaid. |
-| `TransactionsService` | Fetches transactions from Plaid across all of a user's linked items for a given date range. Decrypts access tokens before each Plaid call. |
-| `PlaidLinkService` | Orchestrates the full Plaid Link lifecycle: creates link tokens, exchanges public tokens for access tokens (encrypting them before storage), persists `PlaidItem` and `PlaidAccount` records, and shares an item with another user. |
+| `BalanceService` | Fetches account balances from Plaid for all `PlaidItem`s linked to a user. Skips non-HEALTHY items (builds a `RelinkSignal` from stored data instead of calling Plaid); on a first-discovered token error, writes the new status and builds a signal. Always returns `200` with healthy account data plus a `relinkRequired` list. |
+| `TransactionsService` | Same per-item status pattern as `BalanceService`, applied to transaction fetches. Returns healthy transactions plus a `relinkRequired` list. |
+| `PlaidLinkService` | Orchestrates the full Plaid Link lifecycle: creates link tokens (initial, update-mode refresh via `linkTokenRefresh`, full fresh-link via `fullRelinkToken`), exchanges public tokens for access tokens (encrypting before storage, resetting status to HEALTHY), replaces an expired item and migrates all shared users (`replaceExpiredItem`), checks login-time relink status (`getRelinkStatus`), persists `PlaidItem` and `PlaidAccount` records, and shares an item with another user. |
 | `CustomOAuth2UserService` | Extends Spring's `OidcUserService`. On each login, looks up or creates the `User` and `OAuthIdentity` records for the authenticated provider identity. |
 | `EncryptionService` | Encrypts and decrypts strings using AES-256-GCM. Used to store Plaid access tokens at rest. The secret key is read from the `ENCRYPTION_KEY` environment variable at startup. |
 
@@ -118,7 +118,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | Entity | Notable methods |
 |---|---|---|
-| `UserRepository` | `User` | `findByEmail()` — email-based lookup used during OAuth login. `findByIdWithPlaidItems()` — fetch join that loads `PlaidItem`s in one query to avoid N+1 issues. |
+| `UserRepository` | `User` | `findByEmail()` — email-based lookup used during OAuth login. `findByIdWithPlaidItems()` — fetch join that loads `PlaidItem`s in one query to avoid N+1 issues. `findAllWithPlaidItem(plaidItemId)` — returns every user who has a given `PlaidItem` linked (used by `replaceExpiredItem` to migrate shared users). |
 | `PlaidItemRepository` | `PlaidItem` | `findByItemId()` — looks up a bank connection by Plaid's own item ID to prevent duplicate items on re-link. |
 | `PlaidAccountRepository` | `PlaidAccount` | `existsByPlaidAccountId()` — deduplication check before persisting a new account. |
 | `OAuthIdentityRepository` | `OAuthIdentity` | `findByProviderAndProviderUserId()` — detects returning users during the OAuth login flow. |
@@ -140,8 +140,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 |---|---|---|
 | `User` | `users` | An application user. Has a many-to-many relationship with `PlaidItem` via the `user_plaid_items` join table. |
 | `OAuthIdentity` | `oauth_identities` | Links a `User` to a specific OAuth provider identity (e.g. their Google account). One user can have multiple identities across providers. |
-| `PlaidItem` | `plaid_items` | A connected bank institution. Stores the AES-encrypted Plaid access token. One item can be shared across multiple users. |
+| `PlaidItem` | `plaid_items` | A connected bank institution. Stores the AES-encrypted Plaid access token, the owning user (`owner_user_id` FK), and the current health status. One item can be shared across multiple users. |
 | `PlaidAccount` | `plaid_accounts` | An individual bank account within a `PlaidItem` (e.g. a checking or savings account). |
+| `PlaidItemStatus` | _(enum)_ | Health state of a `PlaidItem`: `HEALTHY`, `NEEDS_REAUTH` (Plaid returned `ITEM_LOGIN_REQUIRED`), or `INVALID_TOKEN` (Plaid returned `INVALID_ACCESS_TOKEN`). Stored as a `VARCHAR(20)` column on `plaid_items`. |
 
 ---
 
@@ -158,8 +159,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | Used by | What it represents |
 |---|---|---|
-| `BalanceResponse` | `BalanceController` | Wraps a list of `Account` records, each containing name, type, subtype, current balance, available balance, and currency. |
-| `TransactionsResponse` | `TransactionsController` | Wraps a list of `Transaction` records (date, name, amount, currency, categories) plus a total count. |
+| `BalanceResponse` | `BalanceController` | Wraps a list of `Account` records (name, type, subtype, current balance, available balance, currency) plus a `relinkRequired` list of `RelinkSignal`s. `relinkRequired` is always present; empty means all banks are healthy. |
+| `TransactionsResponse` | `TransactionsController` | Wraps a list of `Transaction` records (date, name, amount, currency, categories), a `total` count, and a `relinkRequired` list of `RelinkSignal`s. |
+| `RelinkSignal` | `BalanceController`, `TransactionsController`, `PlaidLinkController` | Notifies the frontend that a bank connection needs attention. Contains `plaidItemId`, `institutionName`, `errorType` (`LOGIN_REQUIRED` or `INVALID_TOKEN`), `canRelink` (true if the requesting user is the owner), `ownerName` (null when `canRelink` is true), and a human-readable `message`. |
 
 ---
 
@@ -194,7 +196,8 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | What it does |
 |---|---|
-| `PlaidClientFactory` | Constructs and configures the `PlaidApi` Retrofit client from environment variables. Also provides `extractErrorDetail()` for reading Plaid error response bodies in logs. |
+| `PlaidClientFactory` | Constructs and configures the `PlaidApi` Retrofit client from environment variables. Provides `extractErrorDetail()` for reading Plaid error response bodies (reads the stream once; pass the returned string downstream). Provides `classifyTokenError(String errorBody)` which returns `Optional<PlaidTokenError>` — `LOGIN_REQUIRED` for `ITEM_LOGIN_REQUIRED`, `INVALID_TOKEN` for `INVALID_ACCESS_TOKEN`, empty otherwise. |
+| `PlaidTokenError` | _(enum)_ | Classifies which type of token failure Plaid reported: `LOGIN_REQUIRED` (credentials/session expired — update mode recovery) or `INVALID_TOKEN` (item deleted/revoked — full re-link required). |
 | `GenerateAccessToken` | One-time sandbox utility with its own `main()`. Creates a Plaid sandbox public token and exchanges it for an access token to paste into `.env`. Not used at runtime. |
 
 ---
@@ -279,8 +282,10 @@ You may NOT proceed to implementation until all three files are complete.
 ### DURING Implementation
 
 - All new code MUST include corresponding tests
+- All modified code MUST have its existing tests updated to remain valid — changing a method signature, adding a branch, or altering behavior requires updating any test that exercises that code
 - Tests must be written alongside or before implementation
 - You are NOT allowed to leave code untested
+- **`mvn test` MUST be run and produce zero failures before implementation is declared complete.** Writing tests without running them does not satisfy this requirement. A passing test suite is the only acceptable definition of done.
 
 ---
 

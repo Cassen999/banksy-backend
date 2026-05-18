@@ -14,6 +14,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import org.example.model.RelinkSignal;
+import org.example.plaid.PlaidTokenError;
+
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -167,6 +171,99 @@ class PlaidLinkControllerTest {
                         .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com")))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void shouldReturnRelinkStatus_whenNoItemsNeedRelinking() throws Exception {
+        when(plaidLinkService.getRelinkStatus(any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/plaid/status")
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.relinkRequired").isArray())
+                .andExpect(jsonPath("$.relinkRequired").isEmpty());
+    }
+
+    @Test
+    void shouldReturnRelinkSignals_whenItemsNeedRelinking() throws Exception {
+        RelinkSignal signal = new RelinkSignal(
+                UUID.randomUUID(), "Chase", PlaidTokenError.LOGIN_REQUIRED,
+                true, null, "Plaid authentication error, please try again.");
+        when(plaidLinkService.getRelinkStatus(any())).thenReturn(List.of(signal));
+
+        mockMvc.perform(get("/api/plaid/status")
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.relinkRequired").isArray())
+                .andExpect(jsonPath("$.relinkRequired[0].institutionName").value("Chase"));
+    }
+
+    @Test
+    void shouldReturnRefreshLinkToken_whenOwnerRequestsIt() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        when(plaidLinkService.linkTokenRefresh(any(), eq(itemId))).thenReturn("refresh-token");
+
+        mockMvc.perform(get("/api/plaid/link-token/refresh/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.link_token").value("refresh-token"));
+    }
+
+    @Test
+    void shouldReturn403_whenNonOwnerRequestsRefreshToken() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        when(plaidLinkService.linkTokenRefresh(any(), eq(itemId)))
+                .thenThrow(new SecurityException("not the owner"));
+
+        mockMvc.perform(get("/api/plaid/link-token/refresh/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("not the owner"));
+    }
+
+    @Test
+    void shouldReturn500_whenRefreshTokenServiceFails() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        when(plaidLinkService.linkTokenRefresh(any(), eq(itemId)))
+                .thenThrow(new RuntimeException("Plaid error"));
+
+        mockMvc.perform(get("/api/plaid/link-token/refresh/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void shouldReturnFullRelinkToken_whenOwnerRequestsIt() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        when(plaidLinkService.fullRelinkToken(any(), eq(itemId))).thenReturn("full-relink-token");
+
+        mockMvc.perform(get("/api/plaid/link-token/full-relink/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.link_token").value("full-relink-token"));
+    }
+
+    @Test
+    void shouldReturn403_whenNonOwnerRequestsFullRelinkToken() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        when(plaidLinkService.fullRelinkToken(any(), eq(itemId)))
+                .thenThrow(new SecurityException("not the owner"));
+
+        mockMvc.perform(get("/api/plaid/link-token/full-relink/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("not the owner"));
+    }
+
+    @Test
+    void shouldReturn500_whenFullRelinkTokenServiceFails() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        when(plaidLinkService.fullRelinkToken(any(), eq(itemId)))
+                .thenThrow(new RuntimeException("Plaid error"));
+
+        mockMvc.perform(get("/api/plaid/link-token/full-relink/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
                 .andExpect(status().isInternalServerError());
     }
 }

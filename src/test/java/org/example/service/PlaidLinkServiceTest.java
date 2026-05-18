@@ -5,7 +5,10 @@ import com.plaid.client.request.PlaidApi;
 import okhttp3.ResponseBody;
 import org.example.entity.PlaidAccount;
 import org.example.entity.PlaidItem;
+import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
+import org.example.model.RelinkSignal;
+import org.example.plaid.PlaidTokenError;
 import org.example.repository.PlaidAccountRepository;
 import org.example.repository.PlaidItemRepository;
 import org.example.repository.UserRepository;
@@ -46,6 +49,8 @@ class PlaidLinkServiceTest {
                 plaidItemRepository, plaidAccountRepository, userRepository);
     }
 
+    // --- createLinkToken ---
+
     @Test
     @SuppressWarnings("unchecked")
     void shouldReturnLinkToken_whenPlaidRespondsSuccessfully() throws IOException {
@@ -72,6 +77,185 @@ class PlaidLinkServiceTest {
                 .hasMessageContaining("Failed to create Plaid link token");
     }
 
+    // --- linkTokenRefresh ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnRefreshLinkToken_whenOwnerRequestsIt() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = itemOwnedBy(userId);
+        when(item.getAccessTokenEnc()).thenReturn("enc-access-token");
+        when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(encryptionService.decrypt("enc-access-token")).thenReturn("decrypted-token");
+
+        LinkTokenCreateResponse linkBody = mock(LinkTokenCreateResponse.class);
+        when(linkBody.getLinkToken()).thenReturn("refresh-link-token");
+        Call<LinkTokenCreateResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.success(linkBody));
+        when(plaidClient.linkTokenCreate(any())).thenReturn(call);
+
+        String result = service.linkTokenRefresh(userId, itemId);
+
+        assertThat(result).isEqualTo("refresh-link-token");
+    }
+
+    @Test
+    void shouldThrowSecurityException_whenNonOwnerRequestsRefreshToken() {
+        UUID itemId = UUID.randomUUID();
+        UUID otherUserId = UUID.randomUUID();
+        PlaidItem item = itemOwnedBy(otherUserId);
+        when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+
+        assertThatThrownBy(() -> service.linkTokenRefresh(userId, itemId))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("do not have access");
+    }
+
+    @Test
+    void shouldThrowIllegalArgument_whenItemNotFoundForRefresh() {
+        when(plaidItemRepository.findById(any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.linkTokenRefresh(userId, UUID.randomUUID()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Bank connection not found");
+    }
+
+    // --- fullRelinkToken ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnFullRelinkToken_whenOwnerRequestsIt() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = itemOwnedBy(userId);
+        when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+
+        LinkTokenCreateResponse linkBody = mock(LinkTokenCreateResponse.class);
+        when(linkBody.getLinkToken()).thenReturn("full-relink-token");
+        Call<LinkTokenCreateResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.success(linkBody));
+        when(plaidClient.linkTokenCreate(any())).thenReturn(call);
+
+        String result = service.fullRelinkToken(userId, itemId);
+
+        assertThat(result).isEqualTo("full-relink-token");
+        verifyNoInteractions(encryptionService);
+    }
+
+    @Test
+    void shouldThrowSecurityException_whenNonOwnerRequestsFullRelinkToken() {
+        UUID itemId = UUID.randomUUID();
+        UUID otherUserId = UUID.randomUUID();
+        PlaidItem item = itemOwnedBy(otherUserId);
+        when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+
+        assertThatThrownBy(() -> service.fullRelinkToken(userId, itemId))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("do not have access");
+    }
+
+    // --- getRelinkStatus ---
+
+    @Test
+    void shouldReturnSignalsForNonHealthyItems_andSkipHealthyItems() {
+        User owner = mock(User.class);
+        when(owner.getId()).thenReturn(userId);
+
+        PlaidItem healthyItem = mock(PlaidItem.class);
+        when(healthyItem.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+
+        PlaidItem needsReauthItem = mock(PlaidItem.class);
+        when(needsReauthItem.getStatus()).thenReturn(PlaidItemStatus.NEEDS_REAUTH);
+        when(needsReauthItem.getOwner()).thenReturn(owner);
+        when(needsReauthItem.getId()).thenReturn(UUID.randomUUID());
+        when(needsReauthItem.getInstitutionName()).thenReturn("Chase");
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(healthyItem, needsReauthItem));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        List<RelinkSignal> result = service.getRelinkStatus(userId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).errorType()).isEqualTo(PlaidTokenError.LOGIN_REQUIRED);
+        assertThat(result.get(0).canRelink()).isTrue();
+    }
+
+    @Test
+    void shouldReturnEmptyList_whenAllItemsAreHealthy() {
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        List<RelinkSignal> result = service.getRelinkStatus(userId);
+
+        assertThat(result).isEmpty();
+    }
+
+    // --- replaceExpiredItem ---
+
+    @Test
+    void shouldMigrateAllUsersFromOldItemToNewItem_andDeleteOldItem() {
+        UUID oldItemId = UUID.randomUUID();
+        UUID newItemId = UUID.randomUUID();
+        UUID sharedUserId = UUID.randomUUID();
+
+        PlaidItem oldItem = mock(PlaidItem.class);
+        when(oldItem.getId()).thenReturn(oldItemId);
+        PlaidItem newItem = mock(PlaidItem.class);
+
+        when(plaidItemRepository.findById(oldItemId)).thenReturn(Optional.of(oldItem));
+        when(plaidItemRepository.findById(newItemId)).thenReturn(Optional.of(newItem));
+
+        User sharedUser = mock(User.class);
+        when(sharedUser.getId()).thenReturn(sharedUserId);
+        when(userRepository.findAllWithPlaidItem(oldItemId)).thenReturn(List.of(sharedUser));
+
+        List<PlaidItem> mutableItems = new ArrayList<>(List.of(oldItem));
+        User loadedUser = mock(User.class);
+        when(loadedUser.getPlaidItems()).thenReturn(mutableItems);
+        when(userRepository.findByIdWithPlaidItems(sharedUserId)).thenReturn(Optional.of(loadedUser));
+
+        service.replaceExpiredItem(oldItemId, newItemId);
+
+        assertThat(mutableItems).doesNotContain(oldItem);
+        assertThat(mutableItems).contains(newItem);
+        verify(plaidItemRepository).delete(oldItem);
+    }
+
+    @Test
+    void shouldNotDuplicateNewItem_whenUserAlreadyHasNewItem() {
+        UUID oldItemId = UUID.randomUUID();
+        UUID newItemId = UUID.randomUUID();
+        UUID sharedUserId = UUID.randomUUID();
+
+        PlaidItem oldItem = mock(PlaidItem.class);
+        when(oldItem.getId()).thenReturn(oldItemId);
+        PlaidItem newItem = mock(PlaidItem.class);
+        when(newItem.getId()).thenReturn(newItemId);
+
+        when(plaidItemRepository.findById(oldItemId)).thenReturn(Optional.of(oldItem));
+        when(plaidItemRepository.findById(newItemId)).thenReturn(Optional.of(newItem));
+
+        User sharedUser = mock(User.class);
+        when(sharedUser.getId()).thenReturn(sharedUserId);
+        when(userRepository.findAllWithPlaidItem(oldItemId)).thenReturn(List.of(sharedUser));
+
+        List<PlaidItem> mutableItems = new ArrayList<>(List.of(oldItem, newItem));
+        User loadedUser = mock(User.class);
+        when(loadedUser.getPlaidItems()).thenReturn(mutableItems);
+        when(userRepository.findByIdWithPlaidItems(sharedUserId)).thenReturn(Optional.of(loadedUser));
+
+        service.replaceExpiredItem(oldItemId, newItemId);
+
+        assertThat(mutableItems).doesNotContain(oldItem);
+        assertThat(mutableItems).containsExactly(newItem);
+    }
+
+    // --- exchangeAndStore ---
+
     @Test
     @SuppressWarnings("unchecked")
     void shouldCreateNewItemAndAccounts_whenPublicTokenIsNew() throws IOException {
@@ -87,8 +271,7 @@ class PlaidLinkServiceTest {
 
         when(plaidItemRepository.findByItemId("item-id-new")).thenReturn(Optional.empty());
         when(encryptionService.encrypt("access-token")).thenReturn("enc-token");
-        PlaidItem savedItem = new PlaidItem();
-        when(plaidItemRepository.save(any())).thenReturn(savedItem);
+        when(plaidItemRepository.save(any())).thenReturn(new PlaidItem());
 
         AccountBase account = mock(AccountBase.class);
         when(account.getAccountId()).thenReturn("acct-1");
@@ -111,8 +294,12 @@ class PlaidLinkServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void shouldReturnExistingItem_whenItemIdAlreadyExistsAndUserOwnsIt() throws IOException {
-        PlaidItem existingItem = new PlaidItem();
+    void shouldResetStatusAndSave_whenExchangingExistingItem() throws IOException {
+        UUID existingItemId = UUID.randomUUID();
+        PlaidItem existingItem = mock(PlaidItem.class);
+        when(existingItem.getId()).thenReturn(existingItemId);
+        when(existingItem.getAccessTokenEnc()).thenReturn("enc-stored-token");
+
         User user = userWithItems(new ArrayList<>(List.of(existingItem)));
         when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
 
@@ -123,11 +310,14 @@ class PlaidLinkServiceTest {
         when(exchangeCall.execute()).thenReturn(Response.success(exchangeBody));
         when(plaidClient.itemPublicTokenExchange(any())).thenReturn(exchangeCall);
         when(plaidItemRepository.findByItemId("item-id-existing")).thenReturn(Optional.of(existingItem));
+        when(encryptionService.decrypt("enc-stored-token")).thenReturn("access-token");
+        when(plaidItemRepository.save(existingItem)).thenReturn(existingItem);
 
-        PlaidItem result = service.exchangeAndStore("public-token", "ins-1", "Test Bank", userId);
+        UUID result = service.exchangeAndStore("public-token", "ins-1", "Test Bank", userId);
 
-        assertThat(result).isEqualTo(existingItem);
-        verify(plaidItemRepository, never()).save(any());
+        verify(existingItem).setStatus(PlaidItemStatus.HEALTHY);
+        verify(plaidItemRepository).save(existingItem);
+        assertThat(result).isEqualTo(existingItemId);
     }
 
     @Test
@@ -175,6 +365,8 @@ class PlaidLinkServiceTest {
         verify(plaidAccountRepository, never()).save(any());
     }
 
+    // --- shareItem ---
+
     @Test
     void shouldShareItem_whenRequestingUserOwnsIt() {
         UUID itemId = UUID.randomUUID();
@@ -184,15 +376,11 @@ class PlaidLinkServiceTest {
         when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
 
         UUID targetId = UUID.randomUUID();
-        User targetUser = userWithItems(new ArrayList<>());
-        when(userRepository.findByEmail("target@example.com")).thenReturn(Optional.of(targetUser));
-        when(userRepository.findByIdWithPlaidItems(targetId)).thenReturn(Optional.of(targetUser));
-        targetUser.getPlaidItems(); // ensure list exists
-
-        // Replicate ID lookup: findByEmail returns user with targetId
         User targetWithId = mock(User.class);
         when(targetWithId.getId()).thenReturn(targetId);
         when(userRepository.findByEmail("target@example.com")).thenReturn(Optional.of(targetWithId));
+
+        User targetUser = userWithItems(new ArrayList<>());
         when(userRepository.findByIdWithPlaidItems(targetId)).thenReturn(Optional.of(targetUser));
 
         service.shareItem(itemId, userId, "target@example.com");
@@ -260,6 +448,8 @@ class PlaidLinkServiceTest {
         assertThat(targetUser.getPlaidItems()).hasSize(1);
     }
 
+    // --- helpers ---
+
     private User userWithItems(List<PlaidItem> items) {
         User user = mock(User.class);
         when(user.getPlaidItems()).thenReturn(items);
@@ -269,6 +459,15 @@ class PlaidLinkServiceTest {
     private PlaidItem plaidItemWithId(UUID id) {
         PlaidItem item = mock(PlaidItem.class);
         when(item.getId()).thenReturn(id);
+        return item;
+    }
+
+    private PlaidItem itemOwnedBy(UUID ownerId) {
+        User owner = mock(User.class);
+        when(owner.getId()).thenReturn(ownerId);
+
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getOwner()).thenReturn(owner);
         return item;
     }
 }

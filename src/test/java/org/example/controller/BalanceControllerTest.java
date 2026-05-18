@@ -43,7 +43,7 @@ class BalanceControllerTest {
     void shouldReturnBalanceResponse_whenAuthenticatedUserCallsEndpoint() throws Exception {
         BalanceResponse.Account account = new BalanceResponse.Account(
                 "Checking", "depository", "checking", 1500.0, 1400.0, "USD");
-        when(balanceService.getBalance(any())).thenReturn(new BalanceResponse(List.of(account)));
+        when(balanceService.getBalance(any())).thenReturn(new BalanceResponse(List.of(account), List.of()));
 
         mockMvc.perform(get("/api/balance")
                         .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))

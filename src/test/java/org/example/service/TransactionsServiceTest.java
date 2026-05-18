@@ -5,8 +5,10 @@ import com.plaid.client.model.TransactionsGetResponse;
 import com.plaid.client.request.PlaidApi;
 import okhttp3.ResponseBody;
 import org.example.entity.PlaidItem;
+import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.TransactionsResponse;
+import org.example.plaid.PlaidTokenError;
 import org.example.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,7 @@ class TransactionsServiceTest {
     @SuppressWarnings("unchecked")
     void shouldReturnAllTransactions_whenUserHasPlaidItems() throws IOException {
         PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc");
         when(encryptionService.decrypt("enc")).thenReturn("token");
 
@@ -74,6 +77,7 @@ class TransactionsServiceTest {
         assertThat(result.transactions()).hasSize(1);
         assertThat(result.transactions().get(0).name()).isEqualTo("Coffee Shop");
         assertThat(result.total()).isEqualTo(1);
+        assertThat(result.relinkRequired()).isEmpty();
     }
 
     @Test
@@ -86,6 +90,7 @@ class TransactionsServiceTest {
 
         assertThat(result.transactions()).isEmpty();
         assertThat(result.total()).isZero();
+        assertThat(result.relinkRequired()).isEmpty();
         verifyNoInteractions(plaidClient);
     }
 
@@ -93,6 +98,7 @@ class TransactionsServiceTest {
     @SuppressWarnings("unchecked")
     void shouldThrowRuntimeException_whenPlaidTransactionsCallFails() throws IOException {
         PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc");
         when(encryptionService.decrypt("enc")).thenReturn("token");
 
@@ -113,6 +119,7 @@ class TransactionsServiceTest {
     @SuppressWarnings("unchecked")
     void shouldRespectDaysParameter_whenCalled() throws IOException {
         PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc");
         when(encryptionService.decrypt("enc")).thenReturn("token");
 
@@ -131,7 +138,90 @@ class TransactionsServiceTest {
 
         service.getTransactions(userId, 7);
 
-        LocalDate expectedStart = LocalDate.now().minusDays(7);
-        assertThat(captor.getValue().getStartDate()).isEqualTo(expectedStart);
+        assertThat(captor.getValue().getStartDate()).isEqualTo(LocalDate.now().minusDays(7));
+    }
+
+    @Test
+    void shouldSkipItemAndBuildRelinkSignal_whenItemStatusIsNeedsReauth() throws IOException {
+        User owner = mock(User.class);
+        when(owner.getId()).thenReturn(userId);
+
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.NEEDS_REAUTH);
+        when(item.getOwner()).thenReturn(owner);
+        when(item.getId()).thenReturn(UUID.randomUUID());
+        when(item.getInstitutionName()).thenReturn("Chase");
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        TransactionsResponse result = service.getTransactions(userId, 30);
+
+        assertThat(result.transactions()).isEmpty();
+        assertThat(result.relinkRequired()).hasSize(1);
+        assertThat(result.relinkRequired().get(0).errorType()).isEqualTo(PlaidTokenError.LOGIN_REQUIRED);
+        verifyNoInteractions(plaidClient);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldWriteNeedsReauthStatusAndReturnSignal_whenPlaidReturnsItemLoginRequired() throws IOException {
+        User owner = mock(User.class);
+        when(owner.getId()).thenReturn(userId);
+
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+        when(item.getAccessTokenEnc()).thenReturn("enc");
+        when(item.getOwner()).thenReturn(owner);
+        when(item.getId()).thenReturn(UUID.randomUUID());
+        when(item.getInstitutionName()).thenReturn("Chase");
+        when(encryptionService.decrypt("enc")).thenReturn("token");
+
+        Call<TransactionsGetResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.error(400,
+                ResponseBody.create(null, "{\"error_code\":\"ITEM_LOGIN_REQUIRED\"}")));
+        when(plaidClient.transactionsGet(any())).thenReturn(call);
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        TransactionsResponse result = service.getTransactions(userId, 30);
+
+        verify(item).setStatus(PlaidItemStatus.NEEDS_REAUTH);
+        assertThat(result.transactions()).isEmpty();
+        assertThat(result.relinkRequired()).hasSize(1);
+        assertThat(result.relinkRequired().get(0).errorType()).isEqualTo(PlaidTokenError.LOGIN_REQUIRED);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldWriteInvalidTokenStatusAndReturnSignal_whenPlaidReturnsInvalidAccessToken() throws IOException {
+        User owner = mock(User.class);
+        when(owner.getId()).thenReturn(userId);
+
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+        when(item.getAccessTokenEnc()).thenReturn("enc");
+        when(item.getOwner()).thenReturn(owner);
+        when(item.getId()).thenReturn(UUID.randomUUID());
+        when(item.getInstitutionName()).thenReturn("Chase");
+        when(encryptionService.decrypt("enc")).thenReturn("token");
+
+        Call<TransactionsGetResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.error(400,
+                ResponseBody.create(null, "{\"error_code\":\"INVALID_ACCESS_TOKEN\"}")));
+        when(plaidClient.transactionsGet(any())).thenReturn(call);
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        TransactionsResponse result = service.getTransactions(userId, 30);
+
+        verify(item).setStatus(PlaidItemStatus.INVALID_TOKEN);
+        assertThat(result.relinkRequired()).hasSize(1);
+        assertThat(result.relinkRequired().get(0).errorType()).isEqualTo(PlaidTokenError.INVALID_TOKEN);
     }
 }
