@@ -4,8 +4,11 @@ import com.plaid.client.model.*;
 import com.plaid.client.request.PlaidApi;
 import org.example.entity.PlaidAccount;
 import org.example.entity.PlaidItem;
+import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
+import org.example.model.RelinkSignal;
 import org.example.plaid.PlaidClientFactory;
+import org.example.plaid.PlaidTokenError;
 import org.example.repository.PlaidAccountRepository;
 import org.example.repository.PlaidItemRepository;
 import org.example.repository.UserRepository;
@@ -14,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import retrofit2.Response;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,8 +60,92 @@ public class PlaidLinkService {
         return response.body().getLinkToken();
     }
 
+    @Transactional(readOnly = true)
+    public String linkTokenRefresh(UUID userId, UUID plaidItemId) throws IOException {
+        PlaidItem item = loadAndVerifyOwner(plaidItemId, userId);
+        String accessToken = encryptionService.decrypt(item.getAccessTokenEnc());
+
+        LinkTokenCreateRequest request = new LinkTokenCreateRequest()
+                .user(new LinkTokenCreateRequestUser().clientUserId(userId.toString()))
+                .clientName("Banksy")
+                .accessToken(accessToken)
+                .countryCodes(List.of(CountryCode.US))
+                .language("en");
+
+        Response<LinkTokenCreateResponse> response = plaidClient.linkTokenCreate(request).execute();
+
+        if (!response.isSuccessful() || response.body() == null) {
+            throw new RuntimeException("Failed to create Plaid refresh link token: " + PlaidClientFactory.extractErrorDetail(response));
+        }
+
+        return response.body().getLinkToken();
+    }
+
+    @Transactional(readOnly = true)
+    public String fullRelinkToken(UUID userId, UUID plaidItemId) throws IOException {
+        loadAndVerifyOwner(plaidItemId, userId);
+
+        LinkTokenCreateRequest request = new LinkTokenCreateRequest()
+                .user(new LinkTokenCreateRequestUser().clientUserId(userId.toString()))
+                .clientName("Banksy")
+                .products(List.of(Products.TRANSACTIONS))
+                .countryCodes(List.of(CountryCode.US))
+                .language("en");
+
+        Response<LinkTokenCreateResponse> response = plaidClient.linkTokenCreate(request).execute();
+
+        if (!response.isSuccessful() || response.body() == null) {
+            throw new RuntimeException("Failed to create Plaid full relink token: " + PlaidClientFactory.extractErrorDetail(response));
+        }
+
+        return response.body().getLinkToken();
+    }
+
+    private PlaidItem loadAndVerifyOwner(UUID plaidItemId, UUID userId) {
+        PlaidItem item = plaidItemRepository.findById(plaidItemId)
+                .orElseThrow(() -> new IllegalArgumentException("Bank connection not found"));
+        if (!item.getOwner().getId().equals(userId)) {
+            throw new SecurityException("You do not have access to this bank connection");
+        }
+        return item;
+    }
+
     @Transactional
-    public PlaidItem exchangeAndStore(String publicToken,
+    public void replaceExpiredItem(UUID oldItemId, UUID newItemId) {
+        PlaidItem oldItem = plaidItemRepository.findById(oldItemId)
+                .orElseThrow(() -> new IllegalArgumentException("Old bank connection not found"));
+        PlaidItem newItem = plaidItemRepository.findById(newItemId)
+                .orElseThrow(() -> new IllegalArgumentException("New bank connection not found"));
+
+        List<User> usersWithOldItem = userRepository.findAllWithPlaidItem(oldItemId);
+        for (User u : usersWithOldItem) {
+            User loaded = userRepository.findByIdWithPlaidItems(u.getId()).orElseThrow();
+            loaded.getPlaidItems().removeIf(pi -> pi.getId().equals(oldItemId));
+            if (!loaded.getPlaidItems().contains(newItem)) {
+                loaded.getPlaidItems().add(newItem);
+            }
+        }
+
+        plaidItemRepository.delete(oldItem);
+    }
+
+    @Transactional(readOnly = true)
+    public List<RelinkSignal> getRelinkStatus(UUID userId) {
+        User user = userRepository.findByIdWithPlaidItems(userId).orElseThrow();
+        List<RelinkSignal> signals = new ArrayList<>();
+
+        for (PlaidItem item : user.getPlaidItems()) {
+            if (item.getStatus() != PlaidItemStatus.HEALTHY) {
+                signals.add(RelinkSignal.from(item, userId,
+                        RelinkSignal.errorTypeFromStatus(item.getStatus())));
+            }
+        }
+
+        return signals;
+    }
+
+    @Transactional
+    public UUID exchangeAndStore(String publicToken,
                                       String institutionId,
                                       String institutionName,
                                       UUID userId) throws IOException {
@@ -77,10 +165,16 @@ public class PlaidLinkService {
         Optional<PlaidItem> existing = plaidItemRepository.findByItemId(itemId);
         if (existing.isPresent()) {
             PlaidItem existingItem = existing.get();
+            String storedToken = encryptionService.decrypt(existingItem.getAccessTokenEnc());
+            if (!storedToken.equals(accessToken)) {
+                existingItem.setAccessTokenEnc(encryptionService.encrypt(accessToken));
+            }
+            existingItem.setStatus(PlaidItemStatus.HEALTHY);
+            plaidItemRepository.save(existingItem);
             if (!user.getPlaidItems().contains(existingItem)) {
                 user.getPlaidItems().add(existingItem);
             }
-            return existingItem;
+            return existingItem.getId();
         }
 
         PlaidItem item = new PlaidItem();
@@ -88,6 +182,8 @@ public class PlaidLinkService {
         item.setItemId(itemId);
         item.setInstitutionId(institutionId);
         item.setInstitutionName(institutionName);
+        item.setOwner(user);
+        item.setStatus(PlaidItemStatus.HEALTHY);
         plaidItemRepository.save(item);
 
         Response<AccountsGetResponse> accountsResponse = plaidClient
@@ -111,7 +207,7 @@ public class PlaidLinkService {
         }
 
         user.getPlaidItems().add(item);
-        return item;
+        return item.getId();
     }
 
     @Transactional

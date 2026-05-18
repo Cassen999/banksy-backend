@@ -1,5 +1,6 @@
 package org.example.controller;
 
+import org.example.model.RelinkSignal;
 import org.example.repository.UserRepository;
 import org.example.service.PlaidLinkService;
 import org.example.util.SecurityUtils;
@@ -8,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,14 +35,56 @@ public class PlaidLinkController {
         }
     }
 
+    @GetMapping("/link-token/refresh/{itemId}")
+    public ResponseEntity<Map<String, String>> refreshLinkToken(
+            @AuthenticationPrincipal OAuth2User principal,
+            @PathVariable UUID itemId) {
+        try {
+            UUID userId = SecurityUtils.resolveUser(principal, userRepository).getId();
+            return ResponseEntity.ok(Map.of("link_token", plaidLinkService.linkTokenRefresh(userId, itemId)));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(403).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/link-token/full-relink/{itemId}")
+    public ResponseEntity<Map<String, String>> fullRelinkLinkToken(
+            @AuthenticationPrincipal OAuth2User principal,
+            @PathVariable UUID itemId) {
+        try {
+            UUID userId = SecurityUtils.resolveUser(principal, userRepository).getId();
+            return ResponseEntity.ok(Map.of("link_token", plaidLinkService.fullRelinkToken(userId, itemId)));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(403).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, List<RelinkSignal>>> getStatus(@AuthenticationPrincipal OAuth2User principal) {
+        try {
+            UUID userId = SecurityUtils.resolveUser(principal, userRepository).getId();
+            return ResponseEntity.ok(Map.of("relinkRequired", plaidLinkService.getRelinkStatus(userId)));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     @PostMapping("/exchange")
     public ResponseEntity<Map<String, String>> exchange(
             @AuthenticationPrincipal OAuth2User principal,
             @RequestBody ExchangeRequest body) {
         try {
             UUID userId = SecurityUtils.resolveUser(principal, userRepository).getId();
-            plaidLinkService.exchangeAndStore(body.publicToken(), body.institutionId(), body.institutionName(), userId);
-            return ResponseEntity.ok(Map.of("status", "ok"));
+            UUID newItemId = plaidLinkService.exchangeAndStore(
+                    body.publicToken(), body.institutionId(), body.institutionName(), userId);
+            if (body.expiredItemId() != null) {
+                plaidLinkService.replaceExpiredItem(body.expiredItemId(), newItemId);
+            }
+            return ResponseEntity.ok(Map.of("status", "ok", "message", "Plaid authentication successful"));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
@@ -63,6 +107,6 @@ public class PlaidLinkController {
         }
     }
 
-    public record ExchangeRequest(String publicToken, String institutionId, String institutionName) {}
+    public record ExchangeRequest(String publicToken, String institutionId, String institutionName, UUID expiredItemId) {}
     public record ShareRequest(UUID plaidItemId, String shareWithEmail) {}
 }

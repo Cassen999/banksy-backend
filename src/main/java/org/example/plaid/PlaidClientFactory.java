@@ -7,6 +7,7 @@ import retrofit2.Response;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Optional;
 
 public class PlaidClientFactory {
 
@@ -33,5 +34,12 @@ public class PlaidClientFactory {
 
     public static String extractErrorDetail(Response<?> response) throws IOException {
         return response.errorBody() != null ? response.errorBody().string() : "no details";
+    }
+
+    public static Optional<PlaidTokenError> classifyTokenError(String errorBody) {
+        if (errorBody == null) return Optional.empty();
+        if (errorBody.contains("ITEM_LOGIN_REQUIRED")) return Optional.of(PlaidTokenError.LOGIN_REQUIRED);
+        if (errorBody.contains("INVALID_ACCESS_TOKEN")) return Optional.of(PlaidTokenError.INVALID_TOKEN);
+        return Optional.empty();
     }
 }

@@ -29,6 +29,14 @@ public class PlaidItem {
     @Column(name = "transaction_cursor", columnDefinition = "TEXT")
     private String transactionCursor;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_user_id", nullable = false)
+    private User owner;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private PlaidItemStatus status = PlaidItemStatus.HEALTHY;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -60,6 +68,10 @@ public class PlaidItem {
     public void setInstitutionName(String institutionName) { this.institutionName = institutionName; }
     public String getTransactionCursor() { return transactionCursor; }
     public void setTransactionCursor(String transactionCursor) { this.transactionCursor = transactionCursor; }
+    public User getOwner() { return owner; }
+    public void setOwner(User owner) { this.owner = owner; }
+    public PlaidItemStatus getStatus() { return status; }
+    public void setStatus(PlaidItemStatus status) { this.status = status; }
     public List<PlaidAccount> getAccounts() { return accounts; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

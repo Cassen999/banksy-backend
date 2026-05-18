@@ -48,7 +48,7 @@ class TransactionsControllerTest {
         TransactionsResponse.Transaction tx = new TransactionsResponse.Transaction(
                 LocalDate.now(), "Groceries", 42.50, "USD", List.of("Food"));
         when(transactionsService.getTransactions(any(), eq(30)))
-                .thenReturn(new TransactionsResponse(List.of(tx), 1));
+                .thenReturn(new TransactionsResponse(List.of(tx), 1, List.of()));
 
         mockMvc.perform(get("/api/transactions")
                         .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
@@ -60,7 +60,7 @@ class TransactionsControllerTest {
     @Test
     void shouldUseDefaultDays_whenNoQueryParamProvided() throws Exception {
         when(transactionsService.getTransactions(any(), eq(30)))
-                .thenReturn(new TransactionsResponse(List.of(), 0));
+                .thenReturn(new TransactionsResponse(List.of(), 0, List.of()));
 
         mockMvc.perform(get("/api/transactions")
                         .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))

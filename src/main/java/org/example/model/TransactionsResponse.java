@@ -3,7 +3,7 @@ package org.example.model;
 import java.time.LocalDate;
 import java.util.List;
 
-public record TransactionsResponse(List<Transaction> transactions, int total) {
+public record TransactionsResponse(List<Transaction> transactions, int total, List<RelinkSignal> relinkRequired) {
 
     public record Transaction(
             LocalDate date,
