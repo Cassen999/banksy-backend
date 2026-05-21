@@ -40,3 +40,6 @@ build/
 
 ### Secrets — never commit these ###
 .env
+
+### Active Feature ###
+plans/.active-feature

@@ -31,3 +31,18 @@ mvn clean
 ## Structure
 
 Source lives under `src/main/java/org/example/` and tests under `src/test/java/org/example/` (not yet created). The `pom.xml` at the root has no dependencies declared yet — add them there as the project grows.
+
+## Active Feature Tracking
+
+The file `plans/.active-feature` must always contain the name of the
+feature currently being worked on. This is used by all hooks to identify
+the correct plan folder.
+
+Rules:
+- When you create a new plan folder under `plans/`, immediately write
+  the folder name to `plans/.active-feature`
+- When switching to work on a different existing feature, update
+  `plans/.active-feature` with that feature's folder name before
+  doing anything else
+- Never delete `plans/.active-feature`
+- The contents must exactly match an existing folder name under `plans/`
