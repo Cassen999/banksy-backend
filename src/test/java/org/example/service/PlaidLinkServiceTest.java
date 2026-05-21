@@ -20,6 +20,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import retrofit2.Call;
 import retrofit2.Response;
 
+import org.mockito.ArgumentCaptor;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -120,6 +122,24 @@ class PlaidLinkServiceTest {
                 .hasMessageContaining("Bank connection not found");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldThrowRuntimeException_whenPlaidRefreshLinkTokenCallFails() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = itemOwnedBy(userId);
+        when(item.getAccessTokenEnc()).thenReturn("enc-token");
+        when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+
+        Call<LinkTokenCreateResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.error(500, okhttp3.ResponseBody.create(null, "error")));
+        when(plaidClient.linkTokenCreate(any())).thenReturn(call);
+
+        assertThatThrownBy(() -> service.linkTokenRefresh(userId, itemId))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to create Plaid refresh link token");
+    }
+
     // --- fullRelinkToken ---
 
     @Test
@@ -151,6 +171,22 @@ class PlaidLinkServiceTest {
         assertThatThrownBy(() -> service.fullRelinkToken(userId, itemId))
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("do not have access");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldThrowRuntimeException_whenPlaidFullRelinkTokenCallFails() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = itemOwnedBy(userId);
+        when(plaidItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+
+        Call<LinkTokenCreateResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.error(500, okhttp3.ResponseBody.create(null, "error")));
+        when(plaidClient.linkTokenCreate(any())).thenReturn(call);
+
+        assertThatThrownBy(() -> service.fullRelinkToken(userId, itemId))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to create Plaid full relink token");
     }
 
     // --- getRelinkStatus ---
@@ -446,6 +482,123 @@ class PlaidLinkServiceTest {
         service.shareItem(itemId, userId, "target@example.com");
 
         assertThat(targetUser.getPlaidItems()).hasSize(1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReEncryptToken_whenRelinkedTokenIsDifferent() throws IOException {
+        UUID existingItemId = UUID.randomUUID();
+        PlaidItem existingItem = mock(PlaidItem.class);
+        when(existingItem.getId()).thenReturn(existingItemId);
+        when(existingItem.getAccessTokenEnc()).thenReturn("enc-old-token");
+
+        User user = userWithItems(new ArrayList<>(List.of(existingItem)));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        ItemPublicTokenExchangeResponse exchangeBody = mock(ItemPublicTokenExchangeResponse.class);
+        when(exchangeBody.getAccessToken()).thenReturn("new-access-token");
+        when(exchangeBody.getItemId()).thenReturn("item-id-existing");
+        Call<ItemPublicTokenExchangeResponse> exchangeCall = mock(Call.class);
+        when(exchangeCall.execute()).thenReturn(Response.success(exchangeBody));
+        when(plaidClient.itemPublicTokenExchange(any())).thenReturn(exchangeCall);
+        when(plaidItemRepository.findByItemId("item-id-existing")).thenReturn(Optional.of(existingItem));
+        when(encryptionService.decrypt("enc-old-token")).thenReturn("old-access-token");
+        when(encryptionService.encrypt("new-access-token")).thenReturn("enc-new-token");
+        when(plaidItemRepository.save(existingItem)).thenReturn(existingItem);
+
+        service.exchangeAndStore("public-token", "ins-1", "Test Bank", userId);
+
+        verify(existingItem).setAccessTokenEnc("enc-new-token");
+        verify(existingItem).setStatus(PlaidItemStatus.HEALTHY);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldAddExistingItemToUser_whenUserDoesNotAlreadyHaveIt() throws IOException {
+        UUID existingItemId = UUID.randomUUID();
+        PlaidItem existingItem = mock(PlaidItem.class);
+        when(existingItem.getId()).thenReturn(existingItemId);
+        when(existingItem.getAccessTokenEnc()).thenReturn("enc-token");
+
+        List<PlaidItem> mutableUserItems = new ArrayList<>();
+        User user = userWithItems(mutableUserItems);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        ItemPublicTokenExchangeResponse exchangeBody = mock(ItemPublicTokenExchangeResponse.class);
+        when(exchangeBody.getAccessToken()).thenReturn("access-token");
+        when(exchangeBody.getItemId()).thenReturn("item-id-existing");
+        Call<ItemPublicTokenExchangeResponse> exchangeCall = mock(Call.class);
+        when(exchangeCall.execute()).thenReturn(Response.success(exchangeBody));
+        when(plaidClient.itemPublicTokenExchange(any())).thenReturn(exchangeCall);
+        when(plaidItemRepository.findByItemId("item-id-existing")).thenReturn(Optional.of(existingItem));
+        when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+        when(plaidItemRepository.save(existingItem)).thenReturn(existingItem);
+
+        service.exchangeAndStore("public-token", "ins-1", "Test Bank", userId);
+
+        assertThat(mutableUserItems).contains(existingItem);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldSaveAccountWithNullType_whenTypeIsAbsentAndSubtypeIsPresent() throws IOException {
+        User user = userWithItems(new ArrayList<>());
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        ItemPublicTokenExchangeResponse exchangeBody = mock(ItemPublicTokenExchangeResponse.class);
+        when(exchangeBody.getAccessToken()).thenReturn("access-token");
+        when(exchangeBody.getItemId()).thenReturn("item-id-null-type");
+        Call<ItemPublicTokenExchangeResponse> exchangeCall = mock(Call.class);
+        when(exchangeCall.execute()).thenReturn(Response.success(exchangeBody));
+        when(plaidClient.itemPublicTokenExchange(any())).thenReturn(exchangeCall);
+        when(plaidItemRepository.findByItemId("item-id-null-type")).thenReturn(Optional.empty());
+        when(encryptionService.encrypt("access-token")).thenReturn("enc-token");
+        when(plaidItemRepository.save(any())).thenReturn(new PlaidItem());
+
+        AccountBase account = mock(AccountBase.class);
+        when(account.getAccountId()).thenReturn("acct-null-type");
+        when(account.getType()).thenReturn(null);
+        AccountSubtype subtype = mock(AccountSubtype.class);
+        when(subtype.getValue()).thenReturn("checking");
+        when(account.getSubtype()).thenReturn(subtype);
+        AccountsGetResponse accountsBody = mock(AccountsGetResponse.class);
+        when(accountsBody.getAccounts()).thenReturn(List.of(account));
+        Call<AccountsGetResponse> accountsCall = mock(Call.class);
+        when(accountsCall.execute()).thenReturn(Response.success(accountsBody));
+        when(plaidClient.accountsGet(any())).thenReturn(accountsCall);
+        when(plaidAccountRepository.existsByPlaidAccountId("acct-null-type")).thenReturn(false);
+
+        service.exchangeAndStore("public-token", "ins-1", "Test Bank", userId);
+
+        ArgumentCaptor<PlaidAccount> captor = ArgumentCaptor.forClass(PlaidAccount.class);
+        verify(plaidAccountRepository).save(captor.capture());
+        assertThat(captor.getValue().getType()).isNull();
+        assertThat(captor.getValue().getSubtype()).isEqualTo("checking");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldProceedWithoutAccounts_whenAccountsFetchFails() throws IOException {
+        User user = userWithItems(new ArrayList<>());
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        ItemPublicTokenExchangeResponse exchangeBody = mock(ItemPublicTokenExchangeResponse.class);
+        when(exchangeBody.getAccessToken()).thenReturn("access-token");
+        when(exchangeBody.getItemId()).thenReturn("item-id-new");
+        Call<ItemPublicTokenExchangeResponse> exchangeCall = mock(Call.class);
+        when(exchangeCall.execute()).thenReturn(Response.success(exchangeBody));
+        when(plaidClient.itemPublicTokenExchange(any())).thenReturn(exchangeCall);
+        when(plaidItemRepository.findByItemId("item-id-new")).thenReturn(Optional.empty());
+        when(encryptionService.encrypt("access-token")).thenReturn("enc-token");
+        when(plaidItemRepository.save(any())).thenReturn(new PlaidItem());
+
+        Call<AccountsGetResponse> accountsCall = mock(Call.class);
+        when(accountsCall.execute()).thenReturn(Response.error(500, okhttp3.ResponseBody.create(null, "error")));
+        when(plaidClient.accountsGet(any())).thenReturn(accountsCall);
+
+        service.exchangeAndStore("public-token", "ins-1", "Test Bank", userId);
+
+        verify(plaidAccountRepository, never()).save(any());
     }
 
     // --- helpers ---

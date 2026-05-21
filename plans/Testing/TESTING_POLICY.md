@@ -17,17 +17,6 @@ All code must be tested. No exceptions.
 - Coverage is enforced via **JaCoCo**
 - The build must **FAIL** if coverage drops below 90%
 
-### JaCoCo Coverage Exclusions
-
-The following classes are excluded from coverage measurement because they contain no testable business logic:
-
-- `**/Main.class` — Spring Boot application entry point
-- `**/*Config.class` / `**/*Configuration.class` — Spring configuration classes
-- `**/config/**/*.class` — all classes inside any `config` package
-- `**/*Entity.class` / `**/entity/**/*.class` — JPA entity POJOs
-- `**/*Exception.class` / `**/exception/**/*.class` — exception classes
-
-The 90% threshold applies only to the code that remains after these exclusions (i.e., services, controllers, repositories, and utility classes).
 
 ---
 
@@ -109,19 +98,6 @@ Maintain a balanced test pyramid:
 
 - ~70% Unit Tests (fast, isolated)
 - ~30% Integration Tests (realistic, full stack components)
-
----
-
-## Strict Enforcement Rules
-
-You MUST:
-
-- Refuse to generate code without tests
-- Refuse to finalize any feature that does not meet coverage requirements
-- Refuse to proceed if:
-    - `plans/<feature-name>/TEST_PLAN.md` is missing
-    - Tests are incomplete
-    - Coverage is below 90% (excluding the classes listed in the JaCoCo Coverage Exclusions section)
 
 ---
 

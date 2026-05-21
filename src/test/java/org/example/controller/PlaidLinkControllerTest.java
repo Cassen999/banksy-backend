@@ -25,6 +25,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
@@ -263,6 +264,38 @@ class PlaidLinkControllerTest {
                 .thenThrow(new RuntimeException("Plaid error"));
 
         mockMvc.perform(get("/api/plaid/link-token/full-relink/" + itemId)
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void shouldCallReplaceExpiredItem_whenExchangeRequestHasExpiredItemId() throws Exception {
+        UUID expiredItemId = UUID.randomUUID();
+        UUID newItemId = UUID.randomUUID();
+        when(plaidLinkService.exchangeAndStore(any(), any(), any(), any())).thenReturn(newItemId);
+
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("publicToken", "public-token");
+        body.put("institutionId", "ins-1");
+        body.put("institutionName", "Test Bank");
+        body.put("expiredItemId", expiredItemId.toString());
+
+        mockMvc.perform(post("/api/plaid/exchange")
+                        .with(csrf())
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ok"));
+
+        verify(plaidLinkService).replaceExpiredItem(expiredItemId, newItemId);
+    }
+
+    @Test
+    void shouldReturn500_whenGetStatusServiceThrowsException() throws Exception {
+        when(plaidLinkService.getRelinkStatus(any())).thenThrow(new RuntimeException("db error"));
+
+        mockMvc.perform(get("/api/plaid/status")
                         .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
                 .andExpect(status().isInternalServerError());
     }

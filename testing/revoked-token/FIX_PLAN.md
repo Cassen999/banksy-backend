@@ -1,50 +1,47 @@
-# Fix Plan: Repository Test Environment Failures
-
-**Linked report:** `TEST_REPORT.md`  
-**Affected tests:** `PlaidItemRepositoryTest`, `UserRepositoryTest`, `PlaidAccountRepositoryTest`, `OAuthIdentityRepositoryTest`
-
----
+# Fix Plan — revoked-token
 
 ## Root Cause
 
-Testcontainers 1.21.2 bundles a Docker Java client that negotiates API version 1.32 on initial connection. The Docker Desktop version installed on this machine enforces a minimum API version of 1.40 and rejects the handshake with `Status 400: "client version 1.32 is too old. Minimum supported API version is 1.40"`. Testcontainers cannot initialize the PostgreSQL container and the entire test class fails before any test methods run.
+- **Test failures:** 8 failure(s)/error(s) detected
+- **Low coverage class:** `org.example.service.PlaidLinkService` (line: 100.0%, branch: 75.0%)
 
-This is not a code defect — the test logic, entity mappings, and SQL are correct. The failure is purely an environment incompatibility between the Testcontainers dependency version and the local Docker Desktop installation.
+## Step-by-Step Fix
 
----
+_To be completed by Claude during the fix cycle:_
 
-## Fix Plan
+1. 
+2. 
+3. 
 
-**Option A — Upgrade Testcontainers (recommended)**
+## Fix Applied
 
-1. In `pom.xml`, update the Testcontainers BOM version:
-   ```xml
-   <dependency>
-       <groupId>org.testcontainers</groupId>
-       <artifactId>testcontainers-bom</artifactId>
-       <version>1.21.2</version>  <!-- bump to latest stable -->
-       <type>pom</type>
-       <scope>import</scope>
-   </dependency>
-   ```
-   Check https://github.com/testcontainers/testcontainers-java/releases for the version that bundles a Docker Java client supporting API 1.40+.
+_Update this section after the fix is implemented:_
 
-2. Run `mvn test` and confirm repository tests pass.
+- **What was changed:**
+- **Why it resolves the issue:**
 
-**Option B — Pin Docker API version via properties**
+## Relevant Test Output
 
-Add to `~/.testcontainers.properties`:
 ```
-testcontainers.reuse.enable=false
+Preinitializer$TomcatInitializer.run(BackgroundPreinitializer.java:202)
+	at org.springframework.boot.autoconfigure.BackgroundPreinitializer$1.runSafely(BackgroundPreinitializer.java:120)
+	at org.springframework.boot.autoconfigure.BackgroundPreinitializer$1.run(BackgroundPreinitializer.java:113)
+	at java.base/java.lang.Thread.run(Thread.java:1516)
+Caused by: java.io.IOException: Error while instrumenting com/sun/security/sasl/gsskerb/JdkSASL$ProviderService with JaCoCo 0.8.12.202403310830/dbfb6f2.
+	at org.jacoco.agent.rt.internal_aeaf9ab.core.instr.Instrumenter.instrumentError(Instrumenter.java:161)
+	at org.jacoco.agent.rt.internal_aeaf9ab.core.instr.Instrumenter.instrument(Instrumenter.java:111)
+	at org.jacoco.agent.rt.internal_aeaf9ab.CoverageTransformer.transform(CoverageTransformer.java:92)
+	... 36 more
+Caused by: java.lang.IllegalArgumentException: Unsupported class file major version 70
+	at org.jacoco.agent.rt.internal_aeaf9ab.asm.ClassReader.<init>(ClassReader.java:200)
+	at org.jacoco.agent.rt.internal_aeaf9ab.asm.ClassReader.<init>(ClassReader.java:180)
+	at org.jacoco.agent.rt.internal_aeaf9ab.asm.ClassReader.<init>(ClassReader.java:166)
+	at org.jacoco.agent.rt.internal_aeaf9ab.core.internal.instr.InstrSupport.classReaderFor(InstrSupport.java:280)
+	at org.jacoco.agent.rt.internal_aeaf9ab.core.instr.Instrumenter.instrument(Instrumenter.java:77)
+	at org.jacoco.agent.rt.internal_aeaf9ab.core.instr.Instrumenter.instrument(Instrumenter.java:109)
+	... 37 more
+WARNING: Final field securityContextRepository in class org.springframework.security.web.context.SecurityContextHolderFilter has been mutated reflectively by class org.springframework.util.ReflectionUtils in unnamed module @2a693f59 (file:/Users/hannahgerber/.m2/repository/org/springframework/spring-core/6.2.8/spring-core-6.2.8.jar)
+WARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning
+WARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled
+
 ```
-And set `DOCKER_API_VERSION=1.41` in the environment when running tests, if the Testcontainers version respects that override.
-
-**Option C — Downgrade Docker Desktop**
-
-Revert Docker Desktop to a version that accepts API 1.32. Not recommended as it creates a different incompatibility footprint.
-
----
-
-## After the Fix Is Applied
-
-Update this file with which option was used and the result, then append `<!-- FIX IMPLEMENTED -->` once the user confirms the tests pass.
