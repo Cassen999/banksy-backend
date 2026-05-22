@@ -622,6 +622,41 @@ def build_fix_plan(
 # MAIN
 # ─────────────────────────────────────────────
 
+STOP_COMMANDS = {"stop", "stop.", "stop!", "cancel", "halt", "cancel.", "halt."}
+
+def is_emergency_stop(data):
+    """
+    Returns True if the user's last message was an emergency stop command.
+    Reads the session transcript to find the most recent human turn.
+    """
+    transcript_path = data.get("transcript_path", "")
+    if not transcript_path or not os.path.exists(transcript_path):
+        return False
+    try:
+        last_user_text = ""
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("type") != "user":
+                        continue
+                    content = entry.get("message", {}).get("content", "")
+                    if isinstance(content, str):
+                        last_user_text = content
+                    elif isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                last_user_text = block.get("text", "")
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        return last_user_text.strip().lower() in STOP_COMMANDS
+    except Exception:
+        return False
+
+
 def main():
     try:
         raw = sys.stdin.read()
@@ -629,6 +664,10 @@ def main():
     except (json.JSONDecodeError, ValueError) as e:
         print(f"Hook error: failed to parse stdin — {e}", file=sys.stderr)
         sys.exit(2)
+
+    # Emergency brake — if the user said "stop", exit immediately with no checks.
+    if is_emergency_stop(data):
+        sys.exit(0)
 
     try:
         repo_root = find_repo_root()

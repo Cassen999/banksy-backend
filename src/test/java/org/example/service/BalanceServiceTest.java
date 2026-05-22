@@ -10,6 +10,7 @@ import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.BalanceResponse;
 import org.example.plaid.PlaidTokenError;
+import org.example.repository.PlaidAccountRepository;
 import org.example.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,13 +38,14 @@ class BalanceServiceTest {
     @Mock private PlaidApi plaidClient;
     @Mock private EncryptionService encryptionService;
     @Mock private UserRepository userRepository;
+    @Mock private PlaidAccountRepository plaidAccountRepository;
 
     private BalanceService service;
     private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new BalanceService(plaidClient, encryptionService, userRepository);
+        service = new BalanceService(plaidClient, encryptionService, userRepository, plaidAccountRepository);
     }
 
     @Test
@@ -51,7 +54,9 @@ class BalanceServiceTest {
         PlaidItem item = mock(PlaidItem.class);
         when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc-token");
+        when(item.getId()).thenReturn(UUID.randomUUID());
         when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
         AccountBalance balance = mock(AccountBalance.class);
         when(balance.getCurrent()).thenReturn(1000.0);
@@ -241,7 +246,9 @@ class BalanceServiceTest {
         PlaidItem healthyItem = mock(PlaidItem.class);
         when(healthyItem.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(healthyItem.getAccessTokenEnc()).thenReturn("enc-token");
+        when(healthyItem.getId()).thenReturn(UUID.randomUUID());
         when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
         AccountBalance balance = mock(AccountBalance.class);
         when(balance.getCurrent()).thenReturn(500.0);
@@ -268,5 +275,82 @@ class BalanceServiceTest {
         assertThat(result.accounts().get(0).name()).isEqualTo("Savings");
         assertThat(result.relinkRequired()).hasSize(1);
         assertThat(result.relinkRequired().get(0).institutionName()).isEqualTo("Bad Bank");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeHiddenAccounts_whenSomeAccountsAreHidden() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+        when(item.getAccessTokenEnc()).thenReturn("enc-token");
+        when(item.getId()).thenReturn(itemId);
+        when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+
+        AccountBalance balance = mock(AccountBalance.class);
+        when(balance.getCurrent()).thenReturn(100.0);
+        when(balance.getAvailable()).thenReturn(100.0);
+        when(balance.getIsoCurrencyCode()).thenReturn("USD");
+
+        AccountBase visibleAccount = mock(AccountBase.class);
+        when(visibleAccount.getAccountId()).thenReturn("acct-visible");
+        when(visibleAccount.getName()).thenReturn("Checking");
+        when(visibleAccount.getType()).thenReturn(null);
+        when(visibleAccount.getSubtype()).thenReturn(null);
+        when(visibleAccount.getBalances()).thenReturn(balance);
+
+        AccountBase hiddenAccount = mock(AccountBase.class);
+        when(hiddenAccount.getAccountId()).thenReturn("acct-hidden");
+
+        AccountsGetResponse body = mock(AccountsGetResponse.class);
+        when(body.getAccounts()).thenReturn(List.of(visibleAccount, hiddenAccount));
+
+        Call<AccountsGetResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.success(body));
+        when(plaidClient.accountsBalanceGet(any())).thenReturn(call);
+
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(itemId))
+                .thenReturn(Set.of("acct-hidden"));
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        BalanceResponse result = service.getBalance(userId);
+
+        assertThat(result.accounts()).hasSize(1);
+        assertThat(result.accounts().get(0).name()).isEqualTo("Checking");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnEmpty_whenAllAccountsAreHidden() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+        when(item.getAccessTokenEnc()).thenReturn("enc-token");
+        when(item.getId()).thenReturn(itemId);
+        when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+
+        AccountBase hiddenAccount = mock(AccountBase.class);
+        when(hiddenAccount.getAccountId()).thenReturn("acct-hidden");
+
+        AccountsGetResponse body = mock(AccountsGetResponse.class);
+        when(body.getAccounts()).thenReturn(List.of(hiddenAccount));
+
+        Call<AccountsGetResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.success(body));
+        when(plaidClient.accountsBalanceGet(any())).thenReturn(call);
+
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(itemId))
+                .thenReturn(Set.of("acct-hidden"));
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        BalanceResponse result = service.getBalance(userId);
+
+        assertThat(result.accounts()).isEmpty();
     }
 }
