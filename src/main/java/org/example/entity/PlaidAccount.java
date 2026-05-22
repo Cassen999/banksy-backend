@@ -34,6 +34,9 @@ public class PlaidAccount {
     @Column(name = "mask", length = 4)
     private String mask;
 
+    @Column(name = "hidden", nullable = false)
+    private boolean hidden = false;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -57,5 +60,7 @@ public class PlaidAccount {
     public void setSubtype(String subtype) { this.subtype = subtype; }
     public String getMask() { return mask; }
     public void setMask(String mask) { this.mask = mask; }
+    public boolean isHidden() { return hidden; }
+    public void setHidden(boolean hidden) { this.hidden = hidden; }
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

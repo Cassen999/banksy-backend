@@ -10,6 +10,7 @@ import org.example.model.RelinkSignal;
 import org.example.model.TransactionsResponse;
 import org.example.plaid.PlaidClientFactory;
 import org.example.plaid.PlaidTokenError;
+import org.example.repository.PlaidAccountRepository;
 import org.example.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -28,13 +30,16 @@ public class TransactionsService {
     private final PlaidApi plaidClient;
     private final EncryptionService encryptionService;
     private final UserRepository userRepository;
+    private final PlaidAccountRepository plaidAccountRepository;
 
     public TransactionsService(PlaidApi plaidClient,
                                EncryptionService encryptionService,
-                               UserRepository userRepository) {
+                               UserRepository userRepository,
+                               PlaidAccountRepository plaidAccountRepository) {
         this.plaidClient = plaidClient;
         this.encryptionService = encryptionService;
         this.userRepository = userRepository;
+        this.plaidAccountRepository = plaidAccountRepository;
     }
 
     @Transactional
@@ -72,7 +77,9 @@ public class TransactionsService {
                 throw new RuntimeException("Plaid transactions fetch failed: " + errorBody);
             }
 
+            Set<String> hiddenIds = plaidAccountRepository.findHiddenAccountIdsByItemId(item.getId());
             response.body().getTransactions().stream()
+                    .filter(t -> t.getAccountId() == null || !hiddenIds.contains(t.getAccountId()))
                     .map(t -> new TransactionsResponse.Transaction(
                             t.getDate(), t.getName(), t.getAmount(),
                             t.getIsoCurrencyCode(), t.getCategory()))

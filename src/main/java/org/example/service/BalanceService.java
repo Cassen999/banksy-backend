@@ -11,6 +11,7 @@ import org.example.model.BalanceResponse;
 import org.example.model.RelinkSignal;
 import org.example.plaid.PlaidClientFactory;
 import org.example.plaid.PlaidTokenError;
+import org.example.repository.PlaidAccountRepository;
 import org.example.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -28,13 +30,16 @@ public class BalanceService {
     private final PlaidApi plaidClient;
     private final EncryptionService encryptionService;
     private final UserRepository userRepository;
+    private final PlaidAccountRepository plaidAccountRepository;
 
     public BalanceService(PlaidApi plaidClient,
                           EncryptionService encryptionService,
-                          UserRepository userRepository) {
+                          UserRepository userRepository,
+                          PlaidAccountRepository plaidAccountRepository) {
         this.plaidClient = plaidClient;
         this.encryptionService = encryptionService;
         this.userRepository = userRepository;
+        this.plaidAccountRepository = plaidAccountRepository;
     }
 
     @Transactional
@@ -69,7 +74,11 @@ public class BalanceService {
                 throw new RuntimeException("Plaid balance fetch failed: " + errorBody);
             }
 
-            response.body().getAccounts().stream().map(this::toAccount).forEach(allAccounts::add);
+            Set<String> hiddenIds = plaidAccountRepository.findHiddenAccountIdsByItemId(item.getId());
+            response.body().getAccounts().stream()
+                    .filter(a -> a.getAccountId() == null || !hiddenIds.contains(a.getAccountId()))
+                    .map(this::toAccount)
+                    .forEach(allAccounts::add);
         }
 
         return new BalanceResponse(allAccounts, relinkRequired);

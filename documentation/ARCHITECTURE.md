@@ -75,6 +75,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `AuthController` | `POST /api/auth/logout`, `GET /api/auth/me` | Handles session logout and returns the current user's profile (id, email, name, username). |
 | `BalanceController` | `GET /api/balance` | Resolves the current user and delegates to `BalanceService`. |
 | `PlaidLinkController` | `GET /api/plaid/link-token`, `GET /api/plaid/link-token/refresh/{itemId}`, `GET /api/plaid/link-token/full-relink/{itemId}`, `GET /api/plaid/status`, `POST /api/plaid/exchange`, `POST /api/plaid/share` | Manages the Plaid Link flow: generates link tokens (initial, update-mode refresh, and full-relink), exchanges a public token for a stored access token, replaces an expired item when `expiredItemId` is present in the exchange request, checks per-item health status at login time, and shares a bank connection with another user by email. Also defines the `ExchangeRequest` and `ShareRequest` request-body records. |
+| `RemoveBankController` | `PUT /api/plaid/account/{plaidAccountId}/hide`, `DELETE /api/plaid/item/{plaidItemId}` | Two removal operations. PUT soft-hides a single `PlaidAccount` (sets `hidden = true`, no Plaid API call). DELETE fully removes a `PlaidItem` and all its accounts from Plaid and the database. Both operations notify all linked users on success or failure. Any linked user (owner or shared) may call either endpoint. |
 | `TransactionsController` | `GET /api/transactions` | Resolves the current user and delegates to `TransactionsService` with an optional `days` query parameter (defaults to 30). |
 
 ---
@@ -94,9 +95,11 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | What it does |
 |---|---|
-| `BalanceService` | Fetches account balances from Plaid for all `PlaidItem`s linked to a user. Skips non-HEALTHY items (builds a `RelinkSignal` from stored data instead of calling Plaid); on a first-discovered token error, writes the new status and builds a signal. Always returns `200` with healthy account data plus a `relinkRequired` list. |
-| `TransactionsService` | Same per-item status pattern as `BalanceService`, applied to transaction fetches. Returns healthy transactions plus a `relinkRequired` list. |
+| `BalanceService` | Fetches account balances from Plaid for all `PlaidItem`s linked to a user. Skips non-HEALTHY items (builds a `RelinkSignal` from stored data instead of calling Plaid); on a first-discovered token error, writes the new status and builds a signal. Filters hidden accounts from the Plaid response using `PlaidAccountRepository.findHiddenAccountIdsByItemId`. Always returns `200` with healthy, visible account data plus a `relinkRequired` list. |
+| `TransactionsService` | Same per-item status pattern as `BalanceService`, applied to transaction fetches. Filters transactions belonging to hidden accounts using `PlaidAccountRepository.findHiddenAccountIdsByItemId`. Returns healthy, visible transactions plus a `relinkRequired` list. |
 | `PlaidLinkService` | Orchestrates the full Plaid Link lifecycle: creates link tokens (initial, update-mode refresh via `linkTokenRefresh`, full fresh-link via `fullRelinkToken`), exchanges public tokens for access tokens (encrypting before storage, resetting status to HEALTHY), replaces an expired item and migrates all shared users (`replaceExpiredItem`), checks login-time relink status (`getRelinkStatus`), persists `PlaidItem` and `PlaidAccount` records, and shares an item with another user. |
+| `RemoveBankService` | Handles two removal operations. `hideAccount(UUID plaidAccountId, UUID userId)` soft-hides a single `PlaidAccount` (sets `hidden = true`) without touching Plaid; any linked user may call it. `removeItem(UUID plaidItemId, UUID userId)` fully revokes a `PlaidItem` at Plaid (skips the API call if status is `INVALID_TOKEN`) then hard-deletes it and all its accounts; any linked user may call it. Both methods notify all previously linked users via `NotificationService` on success or failure. Error notifications are saved in a separate (`REQUIRES_NEW`) transaction so they persist even when the main transaction rolls back. |
+| `NotificationService` | Saves in-app notifications for a list of users. Uses `Propagation.REQUIRES_NEW` so notifications commit independently of the caller's transaction — this ensures error notifications are always persisted even when the calling transaction rolls back. |
 | `CustomOAuth2UserService` | Extends Spring's `OidcUserService`. On each login, looks up or creates the `User` and `OAuthIdentity` records for the authenticated provider identity. |
 | `EncryptionService` | Encrypts and decrypts strings using AES-256-GCM. Used to store Plaid access tokens at rest. The secret key is read from the `ENCRYPTION_KEY` environment variable at startup. |
 
@@ -116,9 +119,10 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | Entity | Notable methods |
 |---|---|---|
-| `UserRepository` | `User` | `findByEmail()` — email-based lookup used during OAuth login. `findByIdWithPlaidItems()` — fetch join that loads `PlaidItem`s in one query to avoid N+1 issues. `findAllWithPlaidItem(plaidItemId)` — returns every user who has a given `PlaidItem` linked (used by `replaceExpiredItem` to migrate shared users). |
+| `UserRepository` | `User` | `findByEmail()` — email-based lookup used during OAuth login. `findByIdWithPlaidItems()` — fetch join that loads `PlaidItem`s in one query to avoid N+1 issues. `findAllWithPlaidItem(plaidItemId)` — returns every user who has a given `PlaidItem` linked (used by `replaceExpiredItem` to migrate shared users, and by `RemoveBankService` to identify linked users for notification). |
 | `PlaidItemRepository` | `PlaidItem` | `findByItemId()` — looks up a bank connection by Plaid's own item ID to prevent duplicate items on re-link. |
-| `PlaidAccountRepository` | `PlaidAccount` | `existsByPlaidAccountId()` — deduplication check before persisting a new account. |
+| `PlaidAccountRepository` | `PlaidAccount` | `existsByPlaidAccountId()` — deduplication check before persisting a new account. `findByIdWithItem(id)` — fetch join that loads the parent `PlaidItem` in one query; used by `RemoveBankService.hideAccount` to resolve the item without a second query. `findHiddenAccountIdsByItemId(itemId)` — returns the set of `plaidAccountId` strings for all hidden accounts under a given item; used by `BalanceService` and `TransactionsService` to filter their Plaid API responses. |
+| `NotificationRepository` | `Notification` | No custom query methods. Inherits `saveAll` and `findById` from `JpaRepository`. Used exclusively by `NotificationService`. |
 | `OAuthIdentityRepository` | `OAuthIdentity` | `findByProviderAndProviderUserId()` — detects returning users during the OAuth login flow. |
 
 ---
@@ -139,8 +143,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `User` | `users` | An application user. Has a many-to-many relationship with `PlaidItem` via the `user_plaid_items` join table. |
 | `OAuthIdentity` | `oauth_identities` | Links a `User` to a specific OAuth provider identity (e.g. their Google account). One user can have multiple identities across providers. |
 | `PlaidItem` | `plaid_items` | A connected bank institution. Stores the AES-encrypted Plaid access token, the owning user (`owner_user_id` FK), and the current health status. One item can be shared across multiple users. |
-| `PlaidAccount` | `plaid_accounts` | An individual bank account within a `PlaidItem` (e.g. a checking or savings account). |
+| `PlaidAccount` | `plaid_accounts` | An individual bank account within a `PlaidItem` (e.g. a checking or savings account). The `hidden` boolean column (default `false`) marks accounts soft-hidden by the user; hidden accounts are excluded from balance and transaction responses without removing them from Plaid. The `mask` column stores the last 4 digits of the account number, used in hide-success notification messages. |
 | `PlaidItemStatus` | _(enum)_ | Health state of a `PlaidItem`: `HEALTHY`, `NEEDS_REAUTH` (Plaid returned `ITEM_LOGIN_REQUIRED`), or `INVALID_TOKEN` (Plaid returned `INVALID_ACCESS_TOKEN`). Stored as a `VARCHAR(20)` column on `plaid_items`. |
+| `Notification` | `notifications` | An in-app notification for a user. Stores the target `User` (FK), a `message` (TEXT), a `createdAt` timestamp (set via `@PrePersist`), and a `read` boolean (default `false`). Created by `NotificationService` after any remove-bank operation (success or failure). |
 
 ---
 

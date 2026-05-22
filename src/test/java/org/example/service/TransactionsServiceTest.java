@@ -9,6 +9,7 @@ import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.TransactionsResponse;
 import org.example.plaid.PlaidTokenError;
+import org.example.repository.PlaidAccountRepository;
 import org.example.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,13 +39,14 @@ class TransactionsServiceTest {
     @Mock private PlaidApi plaidClient;
     @Mock private EncryptionService encryptionService;
     @Mock private UserRepository userRepository;
+    @Mock private PlaidAccountRepository plaidAccountRepository;
 
     private TransactionsService service;
     private final UUID userId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new TransactionsService(plaidClient, encryptionService, userRepository);
+        service = new TransactionsService(plaidClient, encryptionService, userRepository, plaidAccountRepository);
     }
 
     @Test
@@ -52,7 +55,9 @@ class TransactionsServiceTest {
         PlaidItem item = mock(PlaidItem.class);
         when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc");
+        when(item.getId()).thenReturn(UUID.randomUUID());
         when(encryptionService.decrypt("enc")).thenReturn("token");
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
         Transaction tx = mock(Transaction.class);
         when(tx.getDate()).thenReturn(LocalDate.now());
@@ -121,7 +126,9 @@ class TransactionsServiceTest {
         PlaidItem item = mock(PlaidItem.class);
         when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc");
+        when(item.getId()).thenReturn(UUID.randomUUID());
         when(encryptionService.decrypt("enc")).thenReturn("token");
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
         TransactionsGetResponse body = mock(TransactionsGetResponse.class);
         when(body.getTransactions()).thenReturn(new ArrayList<>());
@@ -223,5 +230,47 @@ class TransactionsServiceTest {
         verify(item).setStatus(PlaidItemStatus.INVALID_TOKEN);
         assertThat(result.relinkRequired()).hasSize(1);
         assertThat(result.relinkRequired().get(0).errorType()).isEqualTo(PlaidTokenError.INVALID_TOKEN);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeTransactions_fromHiddenAccounts() throws IOException {
+        UUID itemId = UUID.randomUUID();
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+        when(item.getAccessTokenEnc()).thenReturn("enc");
+        when(item.getId()).thenReturn(itemId);
+        when(encryptionService.decrypt("enc")).thenReturn("token");
+
+        Transaction visibleTx = mock(Transaction.class);
+        when(visibleTx.getAccountId()).thenReturn("acct-visible");
+        when(visibleTx.getDate()).thenReturn(LocalDate.now());
+        when(visibleTx.getName()).thenReturn("Grocery Store");
+        when(visibleTx.getAmount()).thenReturn(50.0);
+        when(visibleTx.getIsoCurrencyCode()).thenReturn("USD");
+        when(visibleTx.getCategory()).thenReturn(List.of("Food"));
+
+        Transaction hiddenTx = mock(Transaction.class);
+        when(hiddenTx.getAccountId()).thenReturn("acct-hidden");
+
+        TransactionsGetResponse body = mock(TransactionsGetResponse.class);
+        when(body.getTransactions()).thenReturn(List.of(visibleTx, hiddenTx));
+
+        Call<TransactionsGetResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.success(body));
+        when(plaidClient.transactionsGet(any())).thenReturn(call);
+
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(itemId))
+                .thenReturn(Set.of("acct-hidden"));
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        TransactionsResponse result = service.getTransactions(userId, 30);
+
+        assertThat(result.transactions()).hasSize(1);
+        assertThat(result.transactions().get(0).name()).isEqualTo("Grocery Store");
+        assertThat(result.total()).isEqualTo(1);
     }
 }
