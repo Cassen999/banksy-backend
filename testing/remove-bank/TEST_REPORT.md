@@ -44,7 +44,7 @@ xecutionOrchestrator.java:94)
 	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
 	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
 	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
-Caused by: java.io.IOException: Error while instrumenting org/example/repository/NotificationRepository$MockitoMock$BpgZOtU2$auxiliary$Pd9ZZGol with JaCoCo 0.8.12.202403310830/dbfb6f2.
+Caused by: java.io.IOException: Error while instrumenting org/example/repository/NotificationRepository$MockitoMock$4JKt4jCX$auxiliary$r2oSDoDs with JaCoCo 0.8.12.202403310830/dbfb6f2.
 	at org.jacoco.agent.rt.internal_aeaf9ab.core.instr.Instrumenter.instrumentError(Instrumenter.java:161)
 	at org.jacoco.agent.rt.internal_aeaf9ab.core.instr.Instrumenter.instrument(Instrumenter.java:111)
 	at org.jacoco.agent.rt.internal_aeaf9ab.CoverageTransformer.transform(CoverageTransformer.java:92)

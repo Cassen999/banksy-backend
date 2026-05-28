@@ -183,7 +183,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `PlaidApiConfig` | Declares the `PlaidApi` Spring bean by delegating to `PlaidClientFactory.create()`. This bean is what gets injected into services — do not instantiate `PlaidApi` directly anywhere else. |
 | `PlaidConfig` | Static helper that reads `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENVIRONMENT` from `.env`. Throws with a clear message at startup if any are missing. |
 | `SecurityConfig` | Configures Spring Security: permits `/login`, `/oauth2/**`, `/error`, and `/api/auth/logout`; requires authentication on all other requests. Wires in `CustomOAuth2UserService` for the OIDC login flow. |
-| `WebConfig` | Configures CORS to allow credentialed requests from `localhost:3000` and `localhost:5173` (React dev servers) on `GET` and `POST` methods. |
+| `WebConfig` | Configures CORS to allow credentialed requests from `localhost:3000` and `localhost:5173` (React dev servers) on `GET`, `POST`, `PUT`, and `DELETE` methods. |
 
 ---
 
