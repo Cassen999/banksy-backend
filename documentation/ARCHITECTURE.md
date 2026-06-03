@@ -72,7 +72,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 
 | Class | Route(s) | What it does |
 |---|---|---|
-| `AuthController` | `POST /api/auth/logout`, `GET /api/auth/me` | Handles session logout and returns the current user's profile (id, email, name, username). |
+| `AuthController` | `GET /api/auth/me` | Returns the current user's profile (id, email, name, username). |
 | `BalanceController` | `GET /api/balance` | Resolves the current user and delegates to `BalanceService`. |
 | `PlaidLinkController` | `GET /api/plaid/link-token`, `GET /api/plaid/link-token/refresh/{itemId}`, `GET /api/plaid/link-token/full-relink/{itemId}`, `GET /api/plaid/status`, `POST /api/plaid/exchange`, `POST /api/plaid/share` | Manages the Plaid Link flow: generates link tokens (initial, update-mode refresh, and full-relink), exchanges a public token for a stored access token, replaces an expired item when `expiredItemId` is present in the exchange request, checks per-item health status at login time, and shares a bank connection with another user by email. Also defines the `ExchangeRequest` and `ShareRequest` request-body records. |
 | `RemoveBankController` | `PUT /api/plaid/account/{plaidAccountId}/hide`, `DELETE /api/plaid/item/{plaidItemId}` | Two removal operations. PUT soft-hides a single `PlaidAccount` (sets `hidden = true`, no Plaid API call). DELETE fully removes a `PlaidItem` and all its accounts from Plaid and the database. Both operations notify all linked users on success or failure. Any linked user (owner or shared) may call either endpoint. |
@@ -182,7 +182,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 |---|---|
 | `PlaidApiConfig` | Declares the `PlaidApi` Spring bean by delegating to `PlaidClientFactory.create()`. This bean is what gets injected into services — do not instantiate `PlaidApi` directly anywhere else. |
 | `PlaidConfig` | Static helper that reads `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENVIRONMENT` from `.env`. Throws with a clear message at startup if any are missing. |
-| `SecurityConfig` | Configures Spring Security: permits `/login`, `/oauth2/**`, `/error`, and `/api/auth/logout`; requires authentication on all other requests. Wires in `CustomOAuth2UserService` for the OIDC login flow. |
+| `SecurityConfig` | Configures Spring Security: permits `/login`, `/oauth2/**`, `/error`, and `/logout`; requires authentication on all other requests. Wires in `CustomOAuth2UserService` for the OIDC login flow. On successful login, redirects to `frontend.url`. On OAuth failure (e.g. user denies consent), redirects to `frontend.url`. On logout (`GET /logout`), invalidates the session and redirects directly to `frontend.url`. Adds `prompt=select_account` to every Google authorization request via a custom `OAuth2AuthorizationRequestResolver`, preventing silent re-authentication after logout. |
 | `WebConfig` | Configures CORS to allow credentialed requests from `localhost:3000` and `localhost:5173` (React dev servers) on `GET`, `POST`, `PUT`, and `DELETE` methods. |
 
 ---
