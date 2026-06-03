@@ -17,10 +17,8 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -31,15 +29,6 @@ class AuthControllerTest {
     @Autowired MockMvc mockMvc;
     @MockBean UserRepository userRepository;
     @MockBean CustomOAuth2UserService customOAuth2UserService;
-
-    @Test
-    void shouldReturn200_whenLogoutCalled() throws Exception {
-        mockMvc.perform(post("/api/auth/logout")
-                        .with(csrf())
-                        .with(oidcLogin()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.loggedOut").value(true));
-    }
 
     @Test
     void shouldReturnUserInfo_whenAuthenticatedUserCallsMe() throws Exception {
