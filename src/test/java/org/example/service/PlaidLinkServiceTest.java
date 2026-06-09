@@ -4,6 +4,7 @@ import com.plaid.client.model.*;
 import com.plaid.client.request.PlaidApi;
 import okhttp3.ResponseBody;
 import org.example.entity.PlaidAccount;
+import org.example.service.PlaidEnvironmentService;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class PlaidLinkServiceTest {
 
+    @Mock private PlaidEnvironmentService plaidEnvService;
     @Mock private PlaidApi plaidClient;
     @Mock private EncryptionService encryptionService;
     @Mock private PlaidItemRepository plaidItemRepository;
@@ -47,7 +49,8 @@ class PlaidLinkServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PlaidLinkService(plaidClient, encryptionService,
+        lenient().when(plaidEnvService.getClient()).thenReturn(plaidClient);
+        service = new PlaidLinkService(plaidEnvService, encryptionService,
                 plaidItemRepository, plaidAccountRepository, userRepository);
     }
 

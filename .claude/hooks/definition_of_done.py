@@ -218,6 +218,129 @@ def parse_jacoco_coverage(repo_root):
     )
 
 # ─────────────────────────────────────────────
+# LIVING DOCS — ENDPOINTS.MD / SCHEMA.MD
+# ─────────────────────────────────────────────
+
+# Paths relative to repo root
+ENDPOINTS_DOC = "ENDPOINTS.md"
+SCHEMA_DOC    = "SCHEMA.md"
+
+# Changed files that require ENDPOINTS.md to be updated
+ENDPOINT_TRIGGER_PATTERNS = [
+    r"src/main/java/.*/controller/.*\.java$",
+]
+
+# Changed files that require SCHEMA.md to be updated
+SCHEMA_TRIGGER_PATTERNS = [
+    r"src/main/resources/db/migration/.*\.sql$",
+    r"src/main/java/.*/entity/.*\.java$",
+]
+
+def matches_any(file_path, patterns):
+    """Returns True if file_path matches any regex in patterns."""
+    normalized = file_path.replace("\\", "/")
+    return any(re.search(p, normalized) for p in patterns)
+
+def living_doc_updated_after_triggers(repo_root, doc_path, trigger_files):
+    """
+    Returns True if the living doc at doc_path was written after ALL trigger_files.
+
+    These docs are gitignored so they never appear in git changed-file lists.
+    We use mtime instead: if every trigger file's mtime <= the doc's mtime,
+    the doc was touched after (or at the same moment as) the triggers — pass.
+    If any trigger is newer than the doc, the doc hasn't been refreshed — fail.
+    """
+    full_doc = os.path.join(repo_root, doc_path)
+    if not os.path.exists(full_doc):
+        return False
+
+    doc_mtime = os.path.getmtime(full_doc)
+
+    for tf in trigger_files:
+        full_tf = os.path.join(repo_root, tf)
+        if os.path.exists(full_tf) and os.path.getmtime(full_tf) > doc_mtime:
+            return False  # this trigger was modified after the doc last saved
+
+    return True
+
+def build_living_doc_compliance_report(changed_files, repo_root):
+    """
+    Check whether ENDPOINTS.md and SCHEMA.md need to be updated based on
+    what files changed. Returns (blocks, passes).
+
+    Because both docs are gitignored they can't be detected via git status;
+    mtime comparison against their trigger files is used instead.
+    """
+    blocks = []
+    passes = []
+
+    endpoints_trigger_files = [
+        f for f in changed_files if matches_any(f, ENDPOINT_TRIGGER_PATTERNS)
+    ]
+    schema_trigger_files = [
+        f for f in changed_files if matches_any(f, SCHEMA_TRIGGER_PATTERNS)
+    ]
+
+    endpoints_exists = os.path.exists(os.path.join(repo_root, ENDPOINTS_DOC))
+    schema_exists    = os.path.exists(os.path.join(repo_root, SCHEMA_DOC))
+
+    if endpoints_trigger_files:
+        if not endpoints_exists:
+            blocks.append(
+                "ENDPOINTS.md NOT FOUND\n"
+                f"  Expected at: {ENDPOINTS_DOC}\n"
+                "  A controller file was changed but ENDPOINTS.md does not exist.\n"
+                "  Create it with a full description of all API endpoints, "
+                "including request shape, all response shapes, and all failure codes."
+            )
+        elif not living_doc_updated_after_triggers(
+            repo_root, ENDPOINTS_DOC, endpoints_trigger_files
+        ):
+            blocks.append(
+                "STALE ENDPOINTS.md\n"
+                "  One or more controller files were changed this session but "
+                "documentation/ENDPOINTS.md has not been updated since.\n"
+                "  ENDPOINTS.md must be updated whenever any endpoint is added, "
+                "removed, or its request/response contract changes in any way "
+                "that affects how the frontend calls it.\n"
+                f"  Update {ENDPOINTS_DOC} to reflect the current state of all "
+                "affected endpoints, then re-run."
+            )
+        else:
+            passes.append("ENDPOINTS.md — updated alongside controller change (pass)")
+    else:
+        passes.append("ENDPOINTS.md — no controller changes detected (pass)")
+
+    if schema_trigger_files:
+        if not schema_exists:
+            blocks.append(
+                "SCHEMA.md NOT FOUND\n"
+                f"  Expected at: {SCHEMA_DOC}\n"
+                "  A migration or entity file was changed but SCHEMA.md does not exist.\n"
+                "  Create it with a full description of all database tables, "
+                "columns, relationships, and an ERD diagram."
+            )
+        elif not living_doc_updated_after_triggers(
+            repo_root, SCHEMA_DOC, schema_trigger_files
+        ):
+            blocks.append(
+                "STALE SCHEMA.md\n"
+                "  One or more migration or entity files were changed this session "
+                "but documentation/SCHEMA.md has not been updated since.\n"
+                "  SCHEMA.md must be updated whenever any table, column, "
+                "index, or relationship changes in the database schema.\n"
+                f"  Update {SCHEMA_DOC} to reflect the current database schema, "
+                "then re-run."
+            )
+        else:
+            passes.append("SCHEMA.md — updated alongside schema change (pass)")
+    else:
+        passes.append("SCHEMA.md — no migration/entity changes detected (pass)")
+
+    return blocks, passes
+
+
+# ─────────────────────────────────────────────
 # ARCHITECTURE.MD COMPONENT COMPLIANCE
 # ─────────────────────────────────────────────
 
@@ -716,7 +839,12 @@ def main():
             repo_root
         )
 
-        # ── 4. Write TEST_REPORT.md ───────────────────────────────────────────
+        # ── 4. Living docs compliance (ENDPOINTS.md / SCHEMA.md) ─────────────
+        living_doc_blocks, living_doc_passes = build_living_doc_compliance_report(
+            changed_files, repo_root
+        )
+
+        # ── 5. Write TEST_REPORT.md ───────────────────────────────────────────
         testing_dir = os.path.join(repo_root, "testing", feature_name)
         os.makedirs(testing_dir, exist_ok=True)
 
@@ -803,6 +931,10 @@ def main():
         for arch_block in arch_component_blocks:
             blocks.append(arch_block["message"])
 
+        # Living docs compliance blocks
+        for ld_block in living_doc_blocks:
+            blocks.append(ld_block)
+
         # ── 7. Build the context summary for Claude ───────────────────────────
         summary_lines = [
             "═══════════════════════════════════════════════════",
@@ -845,6 +977,13 @@ def main():
                 )
         elif not arch_component_passes:
             summary_lines.append("    — no Java component changes detected")
+
+        summary_lines.append(f"  ENDPOINTS.md / SCHEMA.md:")
+        for p in living_doc_passes:
+            summary_lines.append(f"    ✓ {p}")
+        for b in living_doc_blocks:
+            first_line = b.split("\n")[0]
+            summary_lines.append(f"    ✗ {first_line}")
 
         summary_lines.append("")
 

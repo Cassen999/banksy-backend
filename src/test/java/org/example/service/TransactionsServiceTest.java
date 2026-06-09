@@ -3,6 +3,7 @@ package org.example.service;
 import com.plaid.client.model.Transaction;
 import com.plaid.client.model.TransactionsGetResponse;
 import com.plaid.client.request.PlaidApi;
+import org.example.service.PlaidEnvironmentService;
 import okhttp3.ResponseBody;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class TransactionsServiceTest {
 
+    @Mock private PlaidEnvironmentService plaidEnvService;
     @Mock private PlaidApi plaidClient;
     @Mock private EncryptionService encryptionService;
     @Mock private UserRepository userRepository;
@@ -46,7 +48,8 @@ class TransactionsServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TransactionsService(plaidClient, encryptionService, userRepository, plaidAccountRepository);
+        lenient().when(plaidEnvService.getClient()).thenReturn(plaidClient);
+        service = new TransactionsService(plaidEnvService, encryptionService, userRepository, plaidAccountRepository);
     }
 
     @Test

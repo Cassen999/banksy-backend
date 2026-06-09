@@ -2,7 +2,6 @@ package org.example.service;
 
 import com.plaid.client.model.ItemRemoveRequest;
 import com.plaid.client.model.ItemRemoveResponse;
-import com.plaid.client.request.PlaidApi;
 import org.example.entity.PlaidAccount;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
@@ -25,20 +24,20 @@ public class RemoveBankService {
     static final String ERROR_MESSAGE =
             "There was an error removing your account, please try again in a few minutes or contact Cassen";
 
-    private final PlaidApi plaidClient;
+    private final PlaidEnvironmentService plaidEnvService;
     private final EncryptionService encryptionService;
     private final PlaidItemRepository plaidItemRepository;
     private final PlaidAccountRepository plaidAccountRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
 
-    public RemoveBankService(PlaidApi plaidClient,
+    public RemoveBankService(PlaidEnvironmentService plaidEnvService,
                              EncryptionService encryptionService,
                              PlaidItemRepository plaidItemRepository,
                              PlaidAccountRepository plaidAccountRepository,
                              UserRepository userRepository,
                              NotificationService notificationService) {
-        this.plaidClient = plaidClient;
+        this.plaidEnvService = plaidEnvService;
         this.encryptionService = encryptionService;
         this.plaidItemRepository = plaidItemRepository;
         this.plaidAccountRepository = plaidAccountRepository;
@@ -87,7 +86,7 @@ public class RemoveBankService {
         try {
             if (item.getStatus() != PlaidItemStatus.INVALID_TOKEN) {
                 String accessToken = encryptionService.decrypt(item.getAccessTokenEnc());
-                Response<ItemRemoveResponse> response = plaidClient
+                Response<ItemRemoveResponse> response = plaidEnvService.getClient()
                         .itemRemove(new ItemRemoveRequest().accessToken(accessToken))
                         .execute();
                 if (!response.isSuccessful()) {

@@ -14,19 +14,26 @@ public class PlaidClientFactory {
     private PlaidClientFactory() {}
 
     public static PlaidApi create() {
-        HashMap<String, String> apiKeys = new HashMap<>();
-        apiKeys.put("clientId", PlaidConfig.getClientId());
-        apiKeys.put("secret", PlaidConfig.getSecret());
+        return create(PlaidConfig.getEnvironment());
+    }
 
-        ApiClient apiClient = new ApiClient(apiKeys);
-
-        String environment = PlaidConfig.getEnvironment();
-        switch (environment.toLowerCase()) {
-            case "sandbox" -> apiClient.setPlaidAdapter(ApiClient.Sandbox);
-            case "production" -> apiClient.setPlaidAdapter(ApiClient.Production);
+    public static PlaidApi create(String environment) {
+        String secret = switch (environment.toLowerCase()) {
+            case "sandbox" -> PlaidConfig.getSecretSandbox();
+            case "production" -> PlaidConfig.getSecretProduction();
             default -> throw new IllegalStateException(
                 "Unknown PLAID_ENVIRONMENT: " + environment + ". Expected 'sandbox' or 'production'."
             );
+        };
+
+        HashMap<String, String> apiKeys = new HashMap<>();
+        apiKeys.put("clientId", PlaidConfig.getClientId());
+        apiKeys.put("secret", secret);
+
+        ApiClient apiClient = new ApiClient(apiKeys);
+        switch (environment.toLowerCase()) {
+            case "sandbox" -> apiClient.setPlaidAdapter(ApiClient.Sandbox);
+            case "production" -> apiClient.setPlaidAdapter(ApiClient.Production);
         }
 
         return apiClient.createService(PlaidApi.class);
