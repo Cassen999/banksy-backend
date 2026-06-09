@@ -4,6 +4,7 @@ import com.plaid.client.model.AccountBase;
 import com.plaid.client.model.AccountBalance;
 import com.plaid.client.model.AccountsGetResponse;
 import com.plaid.client.request.PlaidApi;
+import org.example.service.PlaidEnvironmentService;
 import okhttp3.ResponseBody;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
@@ -35,6 +36,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class BalanceServiceTest {
 
+    @Mock private PlaidEnvironmentService plaidEnvService;
     @Mock private PlaidApi plaidClient;
     @Mock private EncryptionService encryptionService;
     @Mock private UserRepository userRepository;
@@ -45,7 +47,8 @@ class BalanceServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new BalanceService(plaidClient, encryptionService, userRepository, plaidAccountRepository);
+        lenient().when(plaidEnvService.getClient()).thenReturn(plaidClient);
+        service = new BalanceService(plaidEnvService, encryptionService, userRepository, plaidAccountRepository);
     }
 
     @Test

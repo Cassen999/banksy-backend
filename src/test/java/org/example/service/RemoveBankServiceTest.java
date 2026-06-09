@@ -3,6 +3,7 @@ package org.example.service;
 import com.plaid.client.model.ItemRemoveRequest;
 import com.plaid.client.model.ItemRemoveResponse;
 import com.plaid.client.request.PlaidApi;
+import org.example.service.PlaidEnvironmentService;
 import okhttp3.ResponseBody;
 import org.example.entity.PlaidAccount;
 import org.example.entity.PlaidItem;
@@ -33,6 +34,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class RemoveBankServiceTest {
 
+    @Mock private PlaidEnvironmentService plaidEnvService;
     @Mock private PlaidApi plaidClient;
     @Mock private EncryptionService encryptionService;
     @Mock private PlaidItemRepository plaidItemRepository;
@@ -52,7 +54,8 @@ class RemoveBankServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RemoveBankService(plaidClient, encryptionService,
+        lenient().when(plaidEnvService.getClient()).thenReturn(plaidClient);
+        service = new RemoveBankService(plaidEnvService, encryptionService,
                 plaidItemRepository, plaidAccountRepository, userRepository, notificationService);
 
         user = new User();

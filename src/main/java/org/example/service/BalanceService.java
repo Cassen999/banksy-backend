@@ -3,7 +3,6 @@ package org.example.service;
 import com.plaid.client.model.AccountBase;
 import com.plaid.client.model.AccountsBalanceGetRequest;
 import com.plaid.client.model.AccountsGetResponse;
-import com.plaid.client.request.PlaidApi;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
@@ -27,16 +26,16 @@ import java.util.UUID;
 @Service
 public class BalanceService {
 
-    private final PlaidApi plaidClient;
+    private final PlaidEnvironmentService plaidEnvService;
     private final EncryptionService encryptionService;
     private final UserRepository userRepository;
     private final PlaidAccountRepository plaidAccountRepository;
 
-    public BalanceService(PlaidApi plaidClient,
+    public BalanceService(PlaidEnvironmentService plaidEnvService,
                           EncryptionService encryptionService,
                           UserRepository userRepository,
                           PlaidAccountRepository plaidAccountRepository) {
-        this.plaidClient = plaidClient;
+        this.plaidEnvService = plaidEnvService;
         this.encryptionService = encryptionService;
         this.userRepository = userRepository;
         this.plaidAccountRepository = plaidAccountRepository;
@@ -56,7 +55,7 @@ public class BalanceService {
             }
 
             String accessToken = encryptionService.decrypt(item.getAccessTokenEnc());
-            Response<AccountsGetResponse> response = plaidClient
+            Response<AccountsGetResponse> response = plaidEnvService.getClient()
                     .accountsBalanceGet(new AccountsBalanceGetRequest().accessToken(accessToken))
                     .execute();
 

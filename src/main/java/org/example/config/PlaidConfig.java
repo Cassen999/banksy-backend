@@ -10,8 +10,12 @@ public class PlaidConfig {
         return getRequired("PLAID_CLIENT_ID");
     }
 
-    public static String getSecret() {
-        return getRequired("PLAID_SECRET");
+    public static String getSecretSandbox() {
+        return getRequired("PLAID_SECRET_SANDBOX");
+    }
+
+    public static String getSecretProduction() {
+        return getRequired("PLAID_SECRET_PRODUCTION");
     }
 
     public static String getEnvironment() {
