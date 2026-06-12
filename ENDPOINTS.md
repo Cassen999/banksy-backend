@@ -517,6 +517,87 @@ DELETE /api/plaid/item/{plaidItemId}
 
 ---
 
+## Monthly Glance
+
+### `GET /api/monthly-glance`
+Returns daily spending totals for the current calendar month, aggregated across all linked bank accounts. Designed for rendering a line graph on the dashboard.
+
+**Auth required:** Yes  
+**Call:**
+```js
+GET /api/monthly-glance
+// No body, no query params
+```
+
+**Filtering applied (in order):**
+1. Globally hidden accounts (`hidden = true` — excluded from all responses)
+2. Per-user excluded accounts (`user_excluded_accounts` table)
+3. Default rejected categories (hardcoded): `RENT_AND_UTILITIES`, `INCOME`, `TRANSFER_IN`, `LOAN_DISBURSEMENTS`
+4. Per-user rejected categories (`user_rejected_categories` table)
+
+Filtering is done on Plaid's `personalFinanceCategory.primary` and `.detailed` fields. Transactions with a null `personalFinanceCategory` are **included** (treated as non-rejected). Refunds (Plaid negative amounts) net against the day's total. Every day from the 1st of the month through today appears in the response, including zero-spend days.
+
+**Success `200`:**
+```json
+{
+  "dailyTotals": [
+    { "transactionDate": "2026-06-01", "total": 0.0 },
+    { "transactionDate": "2026-06-02", "total": 42.50 },
+    { "transactionDate": "2026-06-12", "total": 18.75 }
+  ],
+  "relinkRequired": []
+}
+```
+
+- `transactionDate` — ISO-8601 date string (`YYYY-MM-DD`), always present for every day from the 1st through today.
+- `total` — sum of transaction amounts for that day. `0.0` for days with no qualifying transactions.
+- `relinkRequired` — non-HEALTHY items produce a `RelinkSignal` here instead of contributing transactions.
+
+**Failures:**
+
+| Status | Condition |
+|--------|-----------|
+| `302` | No active session |
+| `500` | Plaid API error or unexpected server error (empty body) |
+
+---
+
+## Categories
+
+### `GET /api/categories`
+Returns all 146 Plaid PFCv2 taxonomy entries (18 primary + 128 detailed). Used by the category-search UI so users can select entries to add to their personal rejected-categories list.
+
+**Auth required:** Yes  
+**Call:**
+```js
+GET /api/categories
+// No body, no query params
+```
+
+**Success `200`:**
+```json
+{
+  "categories": [
+    { "category": "FOOD_AND_DRINK", "type": "PRIMARY", "primaryCategory": null },
+    { "category": "FOOD_AND_DRINK_COFFEE", "type": "DETAILED", "primaryCategory": "FOOD_AND_DRINK" },
+    { "category": "RENT_AND_UTILITIES", "type": "PRIMARY", "primaryCategory": null }
+  ]
+}
+```
+
+- `category` — the Plaid PFCv2 string. Pass this value when writing to `user_rejected_categories`.
+- `type` — `"PRIMARY"` (18 entries) or `"DETAILED"` (128 entries).
+- `primaryCategory` — `null` for primary entries; the parent primary string for detailed entries.
+
+**Failures:**
+
+| Status | Condition |
+|--------|-----------|
+| `302` | No active session |
+| `500` | Unexpected server error (empty body) |
+
+---
+
 ## Dev (internal tooling — never expose to users)
 
 > These endpoints are unauthenticated and hidden by URL only. They must never be linked from any UI.

@@ -71,6 +71,32 @@
 │ env                        │
 │ updated_at                 │
 └────────────────────────────┘
+
+┌────────────────────────────────┐
+│   user_rejected_categories     │  ← per-user monthly-glance category filter
+├────────────────────────────────┤
+│ id (PK)                        │
+│ user_id (FK → users)           │
+│ category                       │
+│ created_at                     │
+└────────────────────────────────┘
+
+┌────────────────────────────────┐
+│    user_excluded_accounts      │  ← per-user monthly-glance account filter
+├────────────────────────────────┤
+│ id (PK)                        │
+│ user_id (FK → users)           │
+│ plaid_account_id               │
+│ created_at                     │
+└────────────────────────────────┘
+
+┌────────────────────────────────┐
+│       plaid_categories         │  ← read-only Plaid PFCv2 taxonomy (146 rows)
+├────────────────────────────────┤
+│ category (PK)                  │
+│ category_type                  │
+│ primary_category               │
+└────────────────────────────────┘
 ```
 
 ---
@@ -207,6 +233,50 @@ Singleton configuration table for the active Plaid environment. Always contains 
 
 ---
 
+### `user_rejected_categories`
+Per-user list of Plaid PFCv2 category strings to exclude from `GET /api/monthly-glance`. Extends the hardcoded default set (`RENT_AND_UTILITIES`, `INCOME`, `TRANSFER_IN`, `LOAN_DISBURSEMENTS`) defined in `MonthlyGlanceService`.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK, default `gen_random_uuid()` | Record identifier |
+| `user_id` | `UUID` | NOT NULL, FK → `users.id` (CASCADE) | The user who added this rejection |
+| `category` | `VARCHAR(255)` | NOT NULL | A Plaid PFCv2 primary or detailed category string (e.g. `"PERSONAL_CARE"` or `"FOOD_AND_DRINK_COFFEE"`) |
+| `created_at` | `TIMESTAMP` | NOT NULL, default `now()` | When the rejection was added |
+
+**Unique constraint:** `(user_id, category)` — prevents duplicates per user.  
+**Written by:** a future settings UI. **Read by:** `MonthlyGlanceService` at request time.
+
+---
+
+### `user_excluded_accounts`
+Per-user list of Plaid account ID strings to exclude from `GET /api/monthly-glance`. Useful for users who want to omit a business account or joint account from their personal spending graph.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK, default `gen_random_uuid()` | Record identifier |
+| `user_id` | `UUID` | NOT NULL, FK → `users.id` (CASCADE) | The user who excluded this account |
+| `plaid_account_id` | `VARCHAR(255)` | NOT NULL | Plaid-assigned account ID string (matches `plaid_accounts.plaid_account_id`) |
+| `created_at` | `TIMESTAMP` | NOT NULL, default `now()` | When the exclusion was added |
+
+**Unique constraint:** `(user_id, plaid_account_id)` — prevents duplicates per user.  
+**Written by:** a future settings UI. **Read by:** `MonthlyGlanceService` at request time.
+
+---
+
+### `plaid_categories`
+Read-only lookup table of all 146 Plaid PFCv2 taxonomy entries. Seeded once by `V8__seed_plaid_categories.sql`. Never written at runtime.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `category` | `VARCHAR(255)` | PK | The taxonomy string itself (e.g. `"FOOD_AND_DRINK"` or `"FOOD_AND_DRINK_COFFEE"`) |
+| `category_type` | `VARCHAR(8)` | NOT NULL | `"PRIMARY"` (18 rows) or `"DETAILED"` (128 rows) |
+| `primary_category` | `VARCHAR(255)` | nullable | Null for primary-level rows; the parent primary string for detailed rows |
+
+**18 primary groups:** INCOME, LOAN_DISBURSEMENTS, LOAN_PAYMENTS, TRANSFER_IN, TRANSFER_OUT, BANK_FEES, ENTERTAINMENT, FOOD_AND_DRINK, GENERAL_MERCHANDISE, HOME_IMPROVEMENT, MEDICAL, PERSONAL_CARE, GENERAL_SERVICES, GOVERNMENT_AND_NON_PROFIT, TRANSPORTATION, TRAVEL, RENT_AND_UTILITIES, OTHER.  
+**Surfaced by:** `GET /api/categories`.
+
+---
+
 ## Key Relationships Summary
 
 ```
@@ -217,13 +287,19 @@ users (1) ──────────────── (N) oauth_identities
   │                            │
   │                            └── (1) ──── (N) plaid_accounts
   │
-  └── (M:N via user_plaid_items) ──── plaid_items
-                                           (shared access)
+  ├── (M:N via user_plaid_items) ──── plaid_items
+  │                                        (shared access)
+  │
+  ├── (1) ──────────────── (N) notifications
+  ├── (1) ──────────────── (N) user_rejected_categories
+  └── (1) ──────────────── (N) user_excluded_accounts
 
-users (1) ──────────────── (N) notifications
+plaid_environment_config  ← singleton (id=1)
+plaid_categories          ← read-only taxonomy (146 rows, no FK)
 ```
 
 - A user can **own** many items and be **shared on** many items.
 - Owning vs. sharing determines who can re-authenticate when a token expires.
 - Hiding an account (`hidden = true`) is per-account, not per-item; any linked user can hide.
 - Removing an item (`DELETE /api/plaid/item/{id}`) cascades: deletes the item, all its accounts, and all `user_plaid_items` rows, then notifies every previously linked user.
+- `user_rejected_categories` and `user_excluded_accounts` are per-user settings for `GET /api/monthly-glance` filtering; they cascade on user delete.
