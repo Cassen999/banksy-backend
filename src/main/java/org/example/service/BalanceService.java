@@ -86,6 +86,7 @@ public class BalanceService {
 
     private BalanceResponse.Account toAccount(AccountBase account) {
         return new BalanceResponse.Account(
+                account.getAccountId(),
                 account.getName(),
                 account.getType() != null ? account.getType().getValue() : null,
                 account.getSubtype() != null ? account.getSubtype().getValue() : null,
