@@ -17,6 +17,8 @@ flowchart TD
         TC["TransactionsController"]
         RC["RecurringController"]
         PAC["PlaidAdminController"]
+        MGC["MonthlyGlanceController"]
+        CC["CategoriesController"]
     end
 
     subgraph Services
@@ -27,6 +29,7 @@ flowchart TD
         OAS["CustomOAuth2UserService"]
         ES["EncryptionService"]
         PES["PlaidEnvironmentService"]
+        MGS["MonthlyGlanceService"]
     end
 
     subgraph Repositories
@@ -35,6 +38,9 @@ flowchart TD
         PAR["PlaidAccountRepository"]
         OIR["OAuthIdentityRepository"]
         PECR["PlaidEnvironmentConfigRepository"]
+        URCR["UserRejectedCategoryRepository"]
+        UEAR["UserExcludedAccountRepository"]
+        PCR["PlaidCategoryRepository"]
     end
 
     DB[(PostgreSQL)]
@@ -48,6 +54,8 @@ flowchart TD
     TC --> TS
     RC --> RS
     PAC --> PES
+    MGC --> MGS & UR
+    CC --> PCR
 
     BS --> ES & UR & PES
     PLS --> ES & UR & PIR & PAR & PES
@@ -55,6 +63,7 @@ flowchart TD
     RS --> ES & UR & PAR & PES
     OAS --> UR & OIR
     PES --> PECR
+    MGS --> ES & UR & PAR & URCR & UEAR & PES
 
     PES -->|"getClient()"| Plaid
     Repositories --> DB
@@ -89,6 +98,8 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `TransactionsController` | `GET /api/transactions` | Resolves the current user and delegates to `TransactionsService` with an optional `days` query parameter (defaults to 30). |
 | `RecurringController` | `GET /api/recurring` | Resolves the current user and delegates to `RecurringService` with an optional `accountId` query parameter. Returns `404` if the accountId is not found, `403` if the user is not linked to that account's item, `500` on other errors. |
 | `PlaidAdminController` | `GET /api/dev/plaid/environment`, `POST /api/dev/plaid/environment/toggle` | Dev-only, unauthenticated (hidden by URL). GET returns the currently active Plaid environment as `{"environment":"sandbox"}`. POST toggles between sandbox and production, persists the new env to the DB, and returns the new value. |
+| `MonthlyGlanceController` | `GET /api/monthly-glance` | Resolves the current user and delegates to `MonthlyGlanceService`. Returns `500` on any unhandled exception. |
+| `CategoriesController` | `GET /api/categories` | Reads all rows from `PlaidCategoryRepository` and returns the full Plaid PFCv2 taxonomy (146 entries). No user resolution required; authentication only. |
 
 ---
 
@@ -116,6 +127,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `NotificationService` | Saves in-app notifications for a list of users. Uses `Propagation.REQUIRES_NEW` so notifications commit independently of the caller's transaction — this ensures error notifications are always persisted even when the calling transaction rolls back. |
 | `CustomOAuth2UserService` | Extends Spring's `OidcUserService`. On each login, looks up or creates the `User` and `OAuthIdentity` records for the authenticated provider identity. |
 | `EncryptionService` | Encrypts and decrypts strings using AES-256-GCM. Used to store Plaid access tokens at rest. The secret key is read from the `ENCRYPTION_KEY` environment variable at startup. |
+| `MonthlyGlanceService` | Aggregates transactions from all healthy linked items for the current calendar month. Builds a merged set of rejected categories from `DEFAULT_REJECTED` (RENT_AND_UTILITIES, INCOME, TRANSFER_IN, LOAN_DISBURSEMENTS) plus any user-added categories from `UserRejectedCategoryRepository`. Filters accounts using hidden account IDs from `PlaidAccountRepository` and user-excluded account IDs from `UserExcludedAccountRepository`. Filters transactions by `personalFinanceCategory.primary` / `.detailed`; null PFC = include. Groups remaining transactions by day (summing amounts, with refunds netting against the total). Fills all days from the 1st of the month through today, including zero-spend days. Non-HEALTHY items produce `RelinkSignal`s instead of API calls; token errors update item status and are included in `relinkRequired`. |
 
 ---
 
@@ -139,6 +151,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `NotificationRepository` | `Notification` | No custom query methods. Inherits `saveAll` and `findById` from `JpaRepository`. Used exclusively by `NotificationService`. |
 | `OAuthIdentityRepository` | `OAuthIdentity` | `findByProviderAndProviderUserId()` — detects returning users during the OAuth login flow. |
 | `PlaidEnvironmentConfigRepository` | `PlaidEnvironmentConfig` | No custom query methods. `findById(1)` reads the single-row config; `save()` persists environment toggles. Used exclusively by `PlaidEnvironmentService`. |
+| `UserRejectedCategoryRepository` | `UserRejectedCategory` | `findCategoriesByUserId(UUID userId)` — returns the set of category strings (primary or detailed) the user has added to their personal rejection list. Used by `MonthlyGlanceService` at request time to extend the default rejected-category set. |
+| `UserExcludedAccountRepository` | `UserExcludedAccount` | `findPlaidAccountIdsByUserId(UUID userId)` — returns the set of Plaid account ID strings the user wants excluded from monthly-glance aggregation. Used by `MonthlyGlanceService` as a per-user account filter. |
+| `PlaidCategoryRepository` | `PlaidCategory` | No custom query methods. `findAll()` returns all 146 seeded Plaid PFCv2 taxonomy rows. Used exclusively by `CategoriesController`. |
 
 ---
 
@@ -162,6 +177,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `PlaidItemStatus` | _(enum)_ | Health state of a `PlaidItem`: `HEALTHY`, `NEEDS_REAUTH` (Plaid returned `ITEM_LOGIN_REQUIRED`), or `INVALID_TOKEN` (Plaid returned `INVALID_ACCESS_TOKEN`). Stored as a `VARCHAR(20)` column on `plaid_items`. |
 | `Notification` | `notifications` | An in-app notification for a user. Stores the target `User` (FK), a `message` (TEXT), a `createdAt` timestamp (set via `@PrePersist`), and a `read` boolean (default `false`). Created by `NotificationService` after any remove-bank operation (success or failure). |
 | `PlaidEnvironmentConfig` | `plaid_environment_config` | Single-row config table (id=1, always). Stores the active Plaid environment (`env`: `sandbox` or `production`) and an `updatedAt` timestamp. Seeded by `V5__add_plaid_environment_config.sql`. Read and written exclusively by `PlaidEnvironmentService`. |
+| `UserRejectedCategory` | `user_rejected_categories` | A single category string (primary or detailed Plaid PFCv2 value) that a user wants excluded from monthly-glance aggregation. Stores `user` (FK to `User`), `category` (VARCHAR), and `createdAt`. Has a unique constraint on `(user_id, category)`. Written by a future settings UI; read exclusively by `UserRejectedCategoryRepository`. |
+| `UserExcludedAccount` | `user_excluded_accounts` | A Plaid account ID string that a user wants excluded from monthly-glance aggregation. Stores `user` (FK to `User`), `plaidAccountId` (VARCHAR), and `createdAt`. Has a unique constraint on `(user_id, plaid_account_id)`. Written by a future settings UI; read exclusively by `UserExcludedAccountRepository`. |
+| `PlaidCategory` | `plaid_categories` | A read-only Plaid PFCv2 taxonomy entry. Primary key is `category` (the taxonomy string itself). `categoryType` is `PRIMARY` or `DETAILED`; `primaryCategory` is null for primary-level rows and points to the parent for detailed rows. Seeded by `V8__seed_plaid_categories.sql` with all 146 entries. No setters; never written at runtime. |
 
 ---
 
@@ -181,7 +199,9 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `BalanceResponse` | `BalanceController` | Wraps a list of `Account` records (accountId, name, type, subtype, current balance, available balance, currency) plus a `relinkRequired` list of `RelinkSignal`s. `accountId` is the Plaid-assigned account identifier, used by the frontend to make per-account requests. `relinkRequired` is always present; empty means all banks are healthy. |
 | `TransactionsResponse` | `TransactionsController` | Wraps a list of `Transaction` records (date, name, amount, currency, categories), a `total` count, and a `relinkRequired` list of `RelinkSignal`s. |
 | `RecurringResponse` | `RecurringController` | Wraps `inflowStreams` and `outflowStreams` (both `List<TransactionStreamDto>`) plus a `relinkRequired` list. `TransactionStreamDto` maps Plaid's `TransactionStream` object: `accountId`, `streamId`, `merchantName`, `description`, `frequency` (string enum: `WEEKLY`, `BIWEEKLY`, `SEMI_MONTHLY`, `MONTHLY`, `ANNUALLY`, `UNKNOWN`), `firstDate`, `lastDate`, `predictedNextDate`, `averageAmount` / `lastAmount` (nested `AmountDto`: `amount`, `isoCurrencyCode`), `isActive`, `personalFinanceCategory` (nested `PersonalFinanceCategoryDto`: `primary`, `detailed`), and `status` (string enum: `MATURE`, `EARLY_DETECTION`, `TOMBSTONED`, `UNKNOWN`). |
-| `RelinkSignal` | `BalanceController`, `TransactionsController`, `RecurringController`, `PlaidLinkController` | Notifies the frontend that a bank connection needs attention. Contains `plaidItemId`, `institutionName`, `errorType` (`LOGIN_REQUIRED` or `INVALID_TOKEN`), `canRelink` (true if the requesting user is the owner), `ownerName` (null when `canRelink` is true), and a human-readable `message`. |
+| `RelinkSignal` | `BalanceController`, `TransactionsController`, `RecurringController`, `PlaidLinkController`, `MonthlyGlanceController` | Notifies the frontend that a bank connection needs attention. Contains `plaidItemId`, `institutionName`, `errorType` (`LOGIN_REQUIRED` or `INVALID_TOKEN`), `canRelink` (true if the requesting user is the owner), `ownerName` (null when `canRelink` is true), and a human-readable `message`. |
+| `MonthlyGlanceResponse` | `MonthlyGlanceController` | Wraps `dailyTotals` (a list of `DailyTotal` records) and `relinkRequired` (a list of `RelinkSignal`s). `DailyTotal` contains `transactionDate` (ISO-8601 string, e.g. `"2026-06-12"`) and `total` (double, USD). Every day from the 1st of the month through today is present; zero-spend days have `total: 0.0`. Refunds (Plaid negative amounts) net against the day's total. |
+| `CategoriesResponse` | `CategoriesController` | Wraps a list of `CategoryEntry` records. Each entry contains `category` (the Plaid PFCv2 string, e.g. `"FOOD_AND_DRINK_COFFEE"`), `type` (`"PRIMARY"` or `"DETAILED"`), and `primaryCategory` (null for primary-level entries; the parent primary string for detailed entries). Used by the frontend category-search UI to let users add entries to their personal rejected-categories list. |
 
 ---
 
