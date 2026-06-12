@@ -17,4 +17,7 @@ public interface PlaidAccountRepository extends JpaRepository<PlaidAccount, UUID
 
     @Query("SELECT a.plaidAccountId FROM PlaidAccount a WHERE a.plaidItem.id = :itemId AND a.hidden = true")
     Set<String> findHiddenAccountIdsByItemId(@Param("itemId") UUID itemId);
+
+    @Query("SELECT a FROM PlaidAccount a JOIN FETCH a.plaidItem WHERE a.plaidAccountId = :plaidAccountId")
+    Optional<PlaidAccount> findByPlaidAccountIdWithItem(@Param("plaidAccountId") String plaidAccountId);
 }
