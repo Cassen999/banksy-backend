@@ -15,6 +15,7 @@ flowchart TD
         BC["BalanceController"]
         PLC["PlaidLinkController"]
         TC["TransactionsController"]
+        RC["RecurringController"]
         PAC["PlaidAdminController"]
     end
 
@@ -22,6 +23,7 @@ flowchart TD
         BS["BalanceService"]
         PLS["PlaidLinkService"]
         TS["TransactionsService"]
+        RS["RecurringService"]
         OAS["CustomOAuth2UserService"]
         ES["EncryptionService"]
         PES["PlaidEnvironmentService"]
@@ -44,11 +46,13 @@ flowchart TD
     BC --> BS
     PLC --> PLS
     TC --> TS
+    RC --> RS
     PAC --> PES
 
     BS --> ES & UR & PES
     PLS --> ES & UR & PIR & PAR & PES
     TS --> ES & UR & PES
+    RS --> ES & UR & PAR & PES
     OAS --> UR & OIR
     PES --> PECR
 
@@ -83,6 +87,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 | `PlaidLinkController` | `GET /api/plaid/link-token`, `GET /api/plaid/link-token/refresh/{itemId}`, `GET /api/plaid/link-token/full-relink/{itemId}`, `GET /api/plaid/status`, `POST /api/plaid/exchange`, `POST /api/plaid/share` | Manages the Plaid Link flow: generates link tokens (initial, update-mode refresh, and full-relink), exchanges a public token for a stored access token, replaces an expired item when `expiredItemId` is present in the exchange request, checks per-item health status at login time, and shares a bank connection with another user by email. Also defines the `ExchangeRequest` and `ShareRequest` request-body records. |
 | `RemoveBankController` | `PUT /api/plaid/account/{plaidAccountId}/hide`, `DELETE /api/plaid/item/{plaidItemId}` | Two removal operations. PUT soft-hides a single `PlaidAccount` (sets `hidden = true`, no Plaid API call). DELETE fully removes a `PlaidItem` and all its accounts from Plaid and the database. Both operations notify all linked users on success or failure. Any linked user (owner or shared) may call either endpoint. |
 | `TransactionsController` | `GET /api/transactions` | Resolves the current user and delegates to `TransactionsService` with an optional `days` query parameter (defaults to 30). |
+| `RecurringController` | `GET /api/recurring` | Resolves the current user and delegates to `RecurringService` with an optional `accountId` query parameter. Returns `404` if the accountId is not found, `403` if the user is not linked to that account's item, `500` on other errors. |
 | `PlaidAdminController` | `GET /api/dev/plaid/environment`, `POST /api/dev/plaid/environment/toggle` | Dev-only, unauthenticated (hidden by URL). GET returns the currently active Plaid environment as `{"environment":"sandbox"}`. POST toggles between sandbox and production, persists the new env to the DB, and returns the new value. |
 
 ---
@@ -104,6 +109,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 |---|---|
 | `BalanceService` | Fetches account balances from Plaid for all `PlaidItem`s linked to a user. Gets the current `PlaidApi` client from `PlaidEnvironmentService.getClient()` on each call. Skips non-HEALTHY items (builds a `RelinkSignal` from stored data instead of calling Plaid); on a first-discovered token error, writes the new status and builds a signal. Filters hidden accounts from the Plaid response using `PlaidAccountRepository.findHiddenAccountIdsByItemId`. Maps each `AccountBase` to a `BalanceResponse.Account` including the Plaid `accountId`. Always returns `200` with healthy, visible account data plus a `relinkRequired` list. |
 | `TransactionsService` | Same per-item status pattern as `BalanceService`, applied to transaction fetches. Gets the current `PlaidApi` client from `PlaidEnvironmentService.getClient()` on each call. Filters transactions belonging to hidden accounts using `PlaidAccountRepository.findHiddenAccountIdsByItemId`. Returns healthy, visible transactions plus a `relinkRequired` list. |
+| `RecurringService` | Fetches recurring transaction streams from Plaid's `/transactions/recurring/get` endpoint. Supports two modes: get-all (loops every linked `PlaidItem` and aggregates `inflowStreams` and `outflowStreams`) and per-account (resolves the owning item via `PlaidAccountRepository.findByPlaidAccountIdWithItem`, verifies the calling user is linked, then calls Plaid with an `accountIds` filter). Applies the same non-HEALTHY skip / token-error update pattern as `BalanceService`. Throws `NoSuchElementException` (→ 404) when the accountId is not in the DB; throws `SecurityException` (→ 403) when the user is not linked to the item. Maps Plaid `TransactionStream` objects to `RecurringResponse.TransactionStreamDto`. |
 | `PlaidLinkService` | Orchestrates the full Plaid Link lifecycle: creates link tokens (initial, update-mode refresh via `linkTokenRefresh`, full fresh-link via `fullRelinkToken`), exchanges public tokens for access tokens (encrypting before storage, resetting status to HEALTHY), replaces an expired item and migrates all shared users (`replaceExpiredItem`), checks login-time relink status (`getRelinkStatus`), persists `PlaidItem` and `PlaidAccount` records, and shares an item with another user. Gets the current `PlaidApi` client from `PlaidEnvironmentService.getClient()` on each call. |
 | `RemoveBankService` | Handles two removal operations. `hideAccount(UUID plaidAccountId, UUID userId)` soft-hides a single `PlaidAccount` (sets `hidden = true`) without touching Plaid; any linked user may call it. `removeItem(UUID plaidItemId, UUID userId)` fully revokes a `PlaidItem` at Plaid via `PlaidEnvironmentService.getClient()` (skips the API call if status is `INVALID_TOKEN`) then hard-deletes it and all its accounts; any linked user may call it. Both methods notify all previously linked users via `NotificationService` on success or failure. Error notifications are saved in a separate (`REQUIRES_NEW`) transaction so they persist even when the main transaction rolls back. |
 | `PlaidEnvironmentService` | Runtime-swappable Plaid client provider. Holds a `volatile PlaidApi currentClient` rebuilt from `PlaidClientFactory`. On startup (`@PostConstruct`), reads the active environment from `plaid_environment_config` row 1 and builds the initial client. `getClient()` returns the current client (called per-request by all Plaid services). `toggle()` (synchronized) flips the environment between `sandbox` and `production`, rebuilds the client via `PlaidClientFactory.create(env)`, and persists the new environment to the DB. `getCurrentEnvironment()` reads the environment from DB (source of truth). |
@@ -129,7 +135,7 @@ Each class belongs in exactly one package. The rules below are enforced during c
 |---|---|---|
 | `UserRepository` | `User` | `findByEmail()` — email-based lookup used during OAuth login. `findByIdWithPlaidItems()` — fetch join that loads `PlaidItem`s in one query to avoid N+1 issues. `findAllWithPlaidItem(plaidItemId)` — returns every user who has a given `PlaidItem` linked (used by `replaceExpiredItem` to migrate shared users, and by `RemoveBankService` to identify linked users for notification). |
 | `PlaidItemRepository` | `PlaidItem` | `findByItemId()` — looks up a bank connection by Plaid's own item ID to prevent duplicate items on re-link. |
-| `PlaidAccountRepository` | `PlaidAccount` | `existsByPlaidAccountId()` — deduplication check before persisting a new account. `findByIdWithItem(id)` — fetch join that loads the parent `PlaidItem` in one query; used by `RemoveBankService.hideAccount` to resolve the item without a second query. `findHiddenAccountIdsByItemId(itemId)` — returns the set of `plaidAccountId` strings for all hidden accounts under a given item; used by `BalanceService` and `TransactionsService` to filter their Plaid API responses. |
+| `PlaidAccountRepository` | `PlaidAccount` | `existsByPlaidAccountId()` — deduplication check before persisting a new account. `findByIdWithItem(id)` — fetch join that loads the parent `PlaidItem` in one query; used by `RemoveBankService.hideAccount` to resolve the item without a second query. `findByPlaidAccountIdWithItem(plaidAccountId)` — fetch join that resolves a `PlaidAccount` and its parent `PlaidItem` from a Plaid-assigned account ID string; used by `RecurringService` for per-account mode authorization. `findHiddenAccountIdsByItemId(itemId)` — returns the set of `plaidAccountId` strings for all hidden accounts under a given item; used by `BalanceService` and `TransactionsService` to filter their Plaid API responses. |
 | `NotificationRepository` | `Notification` | No custom query methods. Inherits `saveAll` and `findById` from `JpaRepository`. Used exclusively by `NotificationService`. |
 | `OAuthIdentityRepository` | `OAuthIdentity` | `findByProviderAndProviderUserId()` — detects returning users during the OAuth login flow. |
 | `PlaidEnvironmentConfigRepository` | `PlaidEnvironmentConfig` | No custom query methods. `findById(1)` reads the single-row config; `save()` persists environment toggles. Used exclusively by `PlaidEnvironmentService`. |
@@ -174,7 +180,8 @@ Each class belongs in exactly one package. The rules below are enforced during c
 |---|---|---|
 | `BalanceResponse` | `BalanceController` | Wraps a list of `Account` records (accountId, name, type, subtype, current balance, available balance, currency) plus a `relinkRequired` list of `RelinkSignal`s. `accountId` is the Plaid-assigned account identifier, used by the frontend to make per-account requests. `relinkRequired` is always present; empty means all banks are healthy. |
 | `TransactionsResponse` | `TransactionsController` | Wraps a list of `Transaction` records (date, name, amount, currency, categories), a `total` count, and a `relinkRequired` list of `RelinkSignal`s. |
-| `RelinkSignal` | `BalanceController`, `TransactionsController`, `PlaidLinkController` | Notifies the frontend that a bank connection needs attention. Contains `plaidItemId`, `institutionName`, `errorType` (`LOGIN_REQUIRED` or `INVALID_TOKEN`), `canRelink` (true if the requesting user is the owner), `ownerName` (null when `canRelink` is true), and a human-readable `message`. |
+| `RecurringResponse` | `RecurringController` | Wraps `inflowStreams` and `outflowStreams` (both `List<TransactionStreamDto>`) plus a `relinkRequired` list. `TransactionStreamDto` maps Plaid's `TransactionStream` object: `accountId`, `streamId`, `merchantName`, `description`, `frequency` (string enum: `WEEKLY`, `BIWEEKLY`, `SEMI_MONTHLY`, `MONTHLY`, `ANNUALLY`, `UNKNOWN`), `firstDate`, `lastDate`, `predictedNextDate`, `averageAmount` / `lastAmount` (nested `AmountDto`: `amount`, `isoCurrencyCode`), `isActive`, `personalFinanceCategory` (nested `PersonalFinanceCategoryDto`: `primary`, `detailed`), and `status` (string enum: `MATURE`, `EARLY_DETECTION`, `TOMBSTONED`, `UNKNOWN`). |
+| `RelinkSignal` | `BalanceController`, `TransactionsController`, `RecurringController`, `PlaidLinkController` | Notifies the frontend that a bank connection needs attention. Contains `plaidItemId`, `institutionName`, `errorType` (`LOGIN_REQUIRED` or `INVALID_TOKEN`), `canRelink` (true if the requesting user is the owner), `ownerName` (null when `canRelink` is true), and a human-readable `message`. |
 
 ---
 

@@ -188,6 +188,87 @@ GET /api/transactions?days=90   // optional; defaults to 30
 
 ---
 
+## Recurring Transactions
+
+### `GET /api/recurring`
+Returns recurring transaction streams (subscriptions, bills, paychecks, etc.) detected by Plaid. Supports two modes via an optional `accountId` query parameter.
+
+**Auth required:** Yes
+
+**Query params:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `accountId` | `string` | No | Plaid account ID (from `GET /api/balance`). Omit to get streams across all linked banks. |
+
+**Call:**
+```js
+GET /api/recurring              // get-all: aggregates across every linked Item
+GET /api/recurring?accountId=BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp  // per-account
+```
+
+**Success `200`:**
+```json
+{
+  "inflowStreams": [
+    {
+      "accountId": "BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp",
+      "streamId": "yBjyGDjMDQGT9PEHLgjdsr9a3Z8EjxAEo6pej",
+      "merchantName": "Employer Inc",
+      "description": "Direct Deposit",
+      "frequency": "BIWEEKLY",
+      "firstDate": "2025-09-01",
+      "lastDate": "2026-06-01",
+      "predictedNextDate": "2026-06-15",
+      "averageAmount": { "amount": -2500.00, "isoCurrencyCode": "USD" },
+      "lastAmount":    { "amount": -2500.00, "isoCurrencyCode": "USD" },
+      "isActive": true,
+      "personalFinanceCategory": { "primary": "INCOME", "detailed": "INCOME_WAGES" },
+      "status": "MATURE"
+    }
+  ],
+  "outflowStreams": [
+    {
+      "accountId": "BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp",
+      "streamId": "no86Lx5QDVHAmAjDNqLosBrNmGGTxDSnbkPeX",
+      "merchantName": "Netflix",
+      "description": "Netflix.com",
+      "frequency": "MONTHLY",
+      "firstDate": "2024-01-15",
+      "lastDate": "2026-05-15",
+      "predictedNextDate": "2026-06-15",
+      "averageAmount": { "amount": 15.49, "isoCurrencyCode": "USD" },
+      "lastAmount":    { "amount": 15.49, "isoCurrencyCode": "USD" },
+      "isActive": true,
+      "personalFinanceCategory": { "primary": "ENTERTAINMENT", "detailed": "ENTERTAINMENT_TV_AND_MOVIES" },
+      "status": "MATURE"
+    }
+  ],
+  "relinkRequired": []
+}
+```
+
+**Field notes:**
+- `inflowStreams` — money coming in (paychecks, transfers, refunds).
+- `outflowStreams` — money going out (subscriptions, bills, rent).
+- `averageAmount.amount` — negative for inflows (money entering account), positive for outflows. Plaid's native convention.
+- `frequency` — `WEEKLY` | `BIWEEKLY` | `SEMI_MONTHLY` | `MONTHLY` | `ANNUALLY` | `UNKNOWN`
+- `status` — `MATURE` (reliable, 3+ occurrences) | `EARLY_DETECTION` (1–2 occurrences, suspected) | `TOMBSTONED` (false positive, expected transaction never arrived) | `UNKNOWN`
+- All streams are returned regardless of `isActive`; filter client-side if needed.
+- In get-all mode, `inflowStreams` and `outflowStreams` are flat arrays merged across all healthy Items. Each stream's `accountId` identifies which account it belongs to.
+- Non-HEALTHY items are skipped; each produces a `RelinkSignal` entry instead of streams.
+
+**Failures:**
+
+| Status | Condition |
+|--------|-----------|
+| `302` | No active session |
+| `404` | `accountId` not found in the database |
+| `403` | `accountId` exists but is not linked to the calling user |
+| `500` | Plaid API error or unexpected server error (empty body) |
+
+---
+
 ## Plaid Link
 
 ### `GET /api/plaid/link-token`
