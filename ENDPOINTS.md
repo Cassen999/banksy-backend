@@ -126,7 +126,7 @@ GET /api/balance
 }
 ```
 
-- `accountId` — Plaid's account identifier; use this when requesting per-account data (e.g. recurring transactions).
+- `accountId` — Plaid's account identifier (`plaid_account_id` in the DB); use this when requesting per-account data (e.g. recurring transactions).
 - `accounts` — only includes accounts from HEALTHY items with `hidden = false`.
 - `relinkRequired` — one entry per non-HEALTHY item the user has linked.
 

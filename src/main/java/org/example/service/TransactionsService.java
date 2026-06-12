@@ -2,7 +2,6 @@ package org.example.service;
 
 import com.plaid.client.model.TransactionsGetRequest;
 import com.plaid.client.model.TransactionsGetResponse;
-import com.plaid.client.request.PlaidApi;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
@@ -27,16 +26,16 @@ import java.util.UUID;
 @Service
 public class TransactionsService {
 
-    private final PlaidApi plaidClient;
+    private final PlaidEnvironmentService plaidEnvService;
     private final EncryptionService encryptionService;
     private final UserRepository userRepository;
     private final PlaidAccountRepository plaidAccountRepository;
 
-    public TransactionsService(PlaidApi plaidClient,
+    public TransactionsService(PlaidEnvironmentService plaidEnvService,
                                EncryptionService encryptionService,
                                UserRepository userRepository,
                                PlaidAccountRepository plaidAccountRepository) {
-        this.plaidClient = plaidClient;
+        this.plaidEnvService = plaidEnvService;
         this.encryptionService = encryptionService;
         this.userRepository = userRepository;
         this.plaidAccountRepository = plaidAccountRepository;
@@ -56,7 +55,7 @@ public class TransactionsService {
             }
 
             String accessToken = encryptionService.decrypt(item.getAccessTokenEnc());
-            Response<TransactionsGetResponse> response = plaidClient
+            Response<TransactionsGetResponse> response = plaidEnvService.getClient()
                     .transactionsGet(new TransactionsGetRequest()
                             .accessToken(accessToken)
                             .startDate(LocalDate.now().minusDays(days))

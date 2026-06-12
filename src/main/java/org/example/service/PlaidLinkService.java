@@ -1,7 +1,6 @@
 package org.example.service;
 
 import com.plaid.client.model.*;
-import com.plaid.client.request.PlaidApi;
 import org.example.entity.PlaidAccount;
 import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
@@ -25,18 +24,18 @@ import java.util.UUID;
 @Service
 public class PlaidLinkService {
 
-    private final PlaidApi plaidClient;
+    private final PlaidEnvironmentService plaidEnvService;
     private final EncryptionService encryptionService;
     private final PlaidItemRepository plaidItemRepository;
     private final PlaidAccountRepository plaidAccountRepository;
     private final UserRepository userRepository;
 
-    public PlaidLinkService(PlaidApi plaidClient,
+    public PlaidLinkService(PlaidEnvironmentService plaidEnvService,
                             EncryptionService encryptionService,
                             PlaidItemRepository plaidItemRepository,
                             PlaidAccountRepository plaidAccountRepository,
                             UserRepository userRepository) {
-        this.plaidClient = plaidClient;
+        this.plaidEnvService = plaidEnvService;
         this.encryptionService = encryptionService;
         this.plaidItemRepository = plaidItemRepository;
         this.plaidAccountRepository = plaidAccountRepository;
@@ -51,7 +50,7 @@ public class PlaidLinkService {
                 .countryCodes(List.of(CountryCode.US))
                 .language("en");
 
-        Response<LinkTokenCreateResponse> response = plaidClient.linkTokenCreate(request).execute();
+        Response<LinkTokenCreateResponse> response = plaidEnvService.getClient().linkTokenCreate(request).execute();
 
         if (!response.isSuccessful() || response.body() == null) {
             throw new RuntimeException("Failed to create Plaid link token: " + PlaidClientFactory.extractErrorDetail(response));
@@ -72,7 +71,7 @@ public class PlaidLinkService {
                 .countryCodes(List.of(CountryCode.US))
                 .language("en");
 
-        Response<LinkTokenCreateResponse> response = plaidClient.linkTokenCreate(request).execute();
+        Response<LinkTokenCreateResponse> response = plaidEnvService.getClient().linkTokenCreate(request).execute();
 
         if (!response.isSuccessful() || response.body() == null) {
             throw new RuntimeException("Failed to create Plaid refresh link token: " + PlaidClientFactory.extractErrorDetail(response));
@@ -92,7 +91,7 @@ public class PlaidLinkService {
                 .countryCodes(List.of(CountryCode.US))
                 .language("en");
 
-        Response<LinkTokenCreateResponse> response = plaidClient.linkTokenCreate(request).execute();
+        Response<LinkTokenCreateResponse> response = plaidEnvService.getClient().linkTokenCreate(request).execute();
 
         if (!response.isSuccessful() || response.body() == null) {
             throw new RuntimeException("Failed to create Plaid full relink token: " + PlaidClientFactory.extractErrorDetail(response));
@@ -151,7 +150,7 @@ public class PlaidLinkService {
                                       UUID userId) throws IOException {
         User user = userRepository.findByIdWithPlaidItems(userId).orElseThrow();
 
-        Response<ItemPublicTokenExchangeResponse> exchangeResponse = plaidClient
+        Response<ItemPublicTokenExchangeResponse> exchangeResponse = plaidEnvService.getClient()
                 .itemPublicTokenExchange(new ItemPublicTokenExchangeRequest().publicToken(publicToken))
                 .execute();
 
@@ -186,7 +185,7 @@ public class PlaidLinkService {
         item.setStatus(PlaidItemStatus.HEALTHY);
         plaidItemRepository.save(item);
 
-        Response<AccountsGetResponse> accountsResponse = plaidClient
+        Response<AccountsGetResponse> accountsResponse = plaidEnvService.getClient()
                 .accountsGet(new AccountsGetRequest().accessToken(accessToken))
                 .execute();
 

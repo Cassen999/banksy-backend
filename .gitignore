@@ -43,3 +43,7 @@ build/
 
 ### Active Feature ###
 plans/.active-feature
+
+### Living frontend-reference docs (generated, not for version control) ###
+ENDPOINTS.md
+SCHEMA.md

@@ -158,7 +158,7 @@ Individual bank accounts within a `plaid_items` connection (e.g. a checking acco
 | `created_at` | `TIMESTAMP` | NOT NULL | When the account record was created |
 
 **What the API surfaces from this table:**  
-Balance and transaction responses include only accounts where `hidden = false`. The `id` field appears as the identifier used when hiding an account via `PUT /api/plaid/account/{plaidAccountId}/hide`.
+Balance and transaction responses include only accounts where `hidden = false`. The `id` field appears as the identifier used when hiding an account via `PUT /api/plaid/account/{plaidAccountId}/hide`. The `plaid_account_id` field is surfaced as `accountId` in `GET /api/balance` responses so the frontend can reference specific accounts (e.g. for per-account recurring transaction requests).
 
 ---
 
