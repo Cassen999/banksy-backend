@@ -13,6 +13,7 @@ import org.example.entity.PlaidItem;
 import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.RecurringResponse;
+import org.example.model.ScheduledDepositDto;
 import org.example.plaid.PlaidTokenError;
 import org.example.repository.PlaidAccountRepository;
 import org.example.repository.UserRepository;
@@ -25,6 +26,8 @@ import retrofit2.Call;
 import retrofit2.Response;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -368,6 +371,187 @@ class RecurringServiceTest {
         assertThat(result.relinkRequired().get(0).errorType()).isEqualTo(PlaidTokenError.LOGIN_REQUIRED);
     }
 
+    // --- scheduled-deposits mode ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnCurrentMonthInflowStreams_whenActiveStreamsExist() throws IOException {
+        LocalDate today = LocalDate.now();
+        LocalDate endOfMonth = YearMonth.now().atEndOfMonth();
+        TransactionStream s1 = streamWithDate("Paycheck", today, true);
+        TransactionStream s2 = streamWithDate("Freelance", endOfMonth, true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(s1, s2), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        List<ScheduledDepositDto> result = service.getScheduledDeposits(userId);
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(ScheduledDepositDto::merchantName)
+                .containsExactlyInAnyOrder("Paycheck", "Freelance");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeOutflowStreams() throws IOException {
+        LocalDate today = LocalDate.now();
+        TransactionStream inflow = streamWithDate("Paycheck", today, true);
+        TransactionStream outflow = streamWithDate("Netflix", today, true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(inflow), List.of(outflow));
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        List<ScheduledDepositDto> result = service.getScheduledDeposits(userId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).merchantName()).isEqualTo("Paycheck");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeInactiveStreams() throws IOException {
+        TransactionStream inactive = streamWithDate("Paycheck", LocalDate.now(), false);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(inactive), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        assertThat(service.getScheduledDeposits(userId)).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeStreamsWithNullPredictedNextDate() throws IOException {
+        TransactionStream nullDate = streamWithDate("Paycheck", null, true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(nullDate), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        assertThat(service.getScheduledDeposits(userId)).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeStreamsWithPredictedNextDateInPast() throws IOException {
+        TransactionStream past = streamWithDate("Paycheck", LocalDate.now().minusDays(1), true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(past), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        assertThat(service.getScheduledDeposits(userId)).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldExcludeStreamsWithPredictedNextDateInFutureMonth() throws IOException {
+        TransactionStream future = streamWithDate("Paycheck", YearMonth.now().plusMonths(1).atDay(1), true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(future), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        assertThat(service.getScheduledDeposits(userId)).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldReturnEmpty_whenNoStreamsMatchCurrentMonth() throws IOException {
+        TransactionStream pastStream = streamWithDate("Past", LocalDate.now().minusDays(10), true);
+        TransactionStream futureStream = streamWithDate("Future", YearMonth.now().plusMonths(1).atDay(1), true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(pastStream, futureStream), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        assertThat(service.getScheduledDeposits(userId)).isEmpty();
+    }
+
+    @Test
+    void shouldReturnEmpty_whenUserHasNoItems_scheduledDeposits() throws IOException {
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(new ArrayList<>());
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        assertThat(service.getScheduledDeposits(userId)).isEmpty();
+        verifyNoInteractions(plaidClient);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldSkipUnhealthyItems_andStillReturnStreamsFromHealthyOnes_scheduledDeposits() throws IOException {
+        User owner = mock(User.class);
+        when(owner.getId()).thenReturn(userId);
+
+        PlaidItem unhealthy = mock(PlaidItem.class);
+        when(unhealthy.getStatus()).thenReturn(PlaidItemStatus.NEEDS_REAUTH);
+        when(unhealthy.getOwner()).thenReturn(owner);
+        when(unhealthy.getId()).thenReturn(UUID.randomUUID());
+        when(unhealthy.getInstitutionName()).thenReturn("Bad Bank");
+
+        TransactionStream deposit = streamWithDate("Paycheck", LocalDate.now(), true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(deposit), List.of());
+        PlaidItem healthy = healthyItem("enc-token");
+        User user = userWithItems(unhealthy, healthy);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        List<ScheduledDepositDto> result = service.getScheduledDeposits(userId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).merchantName()).isEqualTo("Paycheck");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldSortByPredictedNextDateAscending() throws IOException {
+        LocalDate earlier = LocalDate.now();
+        LocalDate later = YearMonth.now().atEndOfMonth();
+        TransactionStream sLater = streamWithDate("Later", later, true);
+        TransactionStream sEarlier = streamWithDate("Earlier", earlier, true);
+        Call<TransactionsRecurringGetResponse> call = buildCall(List.of(sLater, sEarlier), List.of());
+        PlaidItem item = healthyItem("enc-token");
+        User user = userWithItems(item);
+
+        when(encryptionService.decrypt("enc-token")).thenReturn("token");
+        when(plaidClient.transactionsRecurringGet(any())).thenReturn(call);
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        List<ScheduledDepositDto> result = service.getScheduledDeposits(userId);
+
+        assertThat(result).hasSizeGreaterThanOrEqualTo(1);
+        for (int i = 0; i < result.size() - 1; i++) {
+            assertThat(result.get(i).predictedNextDate())
+                    .isBeforeOrEqualTo(result.get(i + 1).predictedNextDate());
+        }
+    }
+
     // --- helpers ---
 
     @SuppressWarnings("unchecked")
@@ -412,6 +596,24 @@ class RecurringServiceTest {
         User user = mock(User.class);
         when(user.getPlaidItems()).thenReturn(List.of(items));
         return user;
+    }
+
+    private TransactionStream streamWithDate(String merchantName, LocalDate predictedNextDate, boolean isActive) {
+        TransactionStream s = mock(TransactionStream.class);
+        when(s.getAccountId()).thenReturn("acct-1");
+        when(s.getStreamId()).thenReturn(UUID.randomUUID().toString());
+        when(s.getMerchantName()).thenReturn(merchantName);
+        when(s.getDescription()).thenReturn(merchantName);
+        when(s.getFrequency()).thenReturn(RecurringTransactionFrequency.MONTHLY);
+        when(s.getFirstDate()).thenReturn(null);
+        when(s.getLastDate()).thenReturn(null);
+        when(s.getPredictedNextDate()).thenReturn(predictedNextDate);
+        when(s.getAverageAmount()).thenReturn(null);
+        when(s.getLastAmount()).thenReturn(null);
+        when(s.getIsActive()).thenReturn(isActive);
+        when(s.getPersonalFinanceCategory()).thenReturn(null);
+        when(s.getStatus()).thenReturn(TransactionStreamStatus.MATURE);
+        return s;
     }
 
 }

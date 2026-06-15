@@ -269,6 +269,52 @@ GET /api/recurring?accountId=BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp  // per-accou
 
 ---
 
+### `GET /api/recurring/scheduled-deposits`
+Returns all active recurring deposit streams whose `predictedNextDate` falls within the current calendar month, aggregated across all linked banks. Sorted ascending by `predictedNextDate`. Non-HEALTHY items are silently skipped.
+
+**Auth required:** Yes  
+**Call:**
+```js
+GET /api/recurring/scheduled-deposits
+// No body, no query params
+```
+
+**Success `200`:**
+```json
+[
+  {
+    "merchantName": "Employer Inc",
+    "description": "Direct Deposit",
+    "frequency": "BIWEEKLY",
+    "firstDate": "2025-09-01",
+    "lastDate": "2026-06-01",
+    "predictedNextDate": "2026-06-20",
+    "averageAmount": { "amount": -2500.00, "isoCurrencyCode": "USD" },
+    "lastAmount":    { "amount": -2500.00, "isoCurrencyCode": "USD" },
+    "isActive": true,
+    "personalFinanceCategory": { "primary": "INCOME", "detailed": "INCOME_WAGES" },
+    "status": "MATURE"
+  }
+]
+```
+
+Returns `[]` when no deposits are predicted for the remainder of the current month.
+
+**Field notes:**
+- Response is a flat JSON array — no wrapper object.
+- `accountId` and `streamId` are intentionally omitted; this endpoint is for display only.
+- `merchantName`, `description`, `averageAmount`, `lastAmount`, and `personalFinanceCategory` may be `null`.
+- `averageAmount.amount` — negative per Plaid convention (money entering the account).
+
+**Failures:**
+
+| Status | Condition |
+|--------|-----------|
+| `302` | No active session |
+| `403` | Any server or Plaid error — body: `"Error getting scheduled deposit data"` |
+
+---
+
 ## Plaid Link
 
 ### `GET /api/plaid/link-token`
