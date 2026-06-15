@@ -9,6 +9,7 @@ import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.RecurringResponse;
 import org.example.model.RelinkSignal;
+import org.example.model.ScheduledDepositDto;
 import org.example.plaid.PlaidClientFactory;
 import org.example.plaid.PlaidTokenError;
 import org.example.repository.PlaidAccountRepository;
@@ -18,7 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
 import retrofit2.Response;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -50,7 +54,32 @@ public class RecurringService {
         return getAllRecurring(userId);
     }
 
-    private RecurringResponse getAllRecurring(UUID userId) throws IOException {
+    public List<ScheduledDepositDto> getScheduledDeposits(UUID userId) throws IOException {
+        RecurringResponse response = getAllRecurring(userId);
+        LocalDate today = LocalDate.now();
+        LocalDate endOfMonth = YearMonth.now().atEndOfMonth();
+        return response.inflowStreams().stream()
+                .filter(s -> Boolean.TRUE.equals(s.isActive()))
+                .filter(s -> s.predictedNextDate() != null)
+                .filter(s -> !s.predictedNextDate().isBefore(today))
+                .filter(s -> !s.predictedNextDate().isAfter(endOfMonth))
+                .sorted(Comparator.comparing(RecurringResponse.TransactionStreamDto::predictedNextDate))
+                .map(s -> new ScheduledDepositDto(
+                        s.merchantName(),
+                        s.description(),
+                        s.frequency(),
+                        s.firstDate(),
+                        s.lastDate(),
+                        s.predictedNextDate(),
+                        s.averageAmount(),
+                        s.lastAmount(),
+                        s.isActive(),
+                        s.personalFinanceCategory(),
+                        s.status()))
+                .toList();
+    }
+
+    RecurringResponse getAllRecurring(UUID userId) throws IOException {
         User user = userRepository.findByIdWithPlaidItems(userId).orElseThrow();
         List<RecurringResponse.TransactionStreamDto> allInflow = new ArrayList<>();
         List<RecurringResponse.TransactionStreamDto> allOutflow = new ArrayList<>();

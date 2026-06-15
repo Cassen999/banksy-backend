@@ -2,6 +2,7 @@ package org.example.controller;
 
 import org.example.entity.User;
 import org.example.model.RecurringResponse;
+import org.example.model.ScheduledDepositDto;
 import org.example.repository.UserRepository;
 import org.example.service.CustomOAuth2UserService;
 import org.example.service.RecurringService;
@@ -13,6 +14,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -22,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -107,5 +110,49 @@ class RecurringControllerTest {
         mockMvc.perform(get("/api/recurring")
                         .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
                 .andExpect(status().isInternalServerError());
+    }
+
+    // --- scheduled-deposits endpoint ---
+
+    @Test
+    void shouldReturn200WithScheduledDeposits_whenAuthenticated() throws Exception {
+        List<ScheduledDepositDto> deposits = List.of(
+                new ScheduledDepositDto("Employer", "DIRECT DEPOSIT", "BIWEEKLY",
+                        null, null, LocalDate.of(2026, 6, 20),
+                        null, null, true, null, "MATURE")
+        );
+        when(recurringService.getScheduledDeposits(any())).thenReturn(deposits);
+
+        mockMvc.perform(get("/api/recurring/scheduled-deposits")
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].merchantName").value("Employer"))
+                .andExpect(jsonPath("$[0].frequency").value("BIWEEKLY"));
+    }
+
+    @Test
+    void shouldReturn200WithEmptyArray_whenNoDepositsThisMonth() throws Exception {
+        when(recurringService.getScheduledDeposits(any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/recurring/scheduled-deposits")
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void shouldReturn403WithMessage_whenServiceThrowsException() throws Exception {
+        when(recurringService.getScheduledDeposits(any())).thenThrow(new RuntimeException("Plaid error"));
+
+        mockMvc.perform(get("/api/recurring/scheduled-deposits")
+                        .with(oidcLogin().userInfoToken(t -> t.claim("email", "test@example.com"))))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string("Error getting scheduled deposit data"));
+    }
+
+    @Test
+    void shouldReturn302_whenNotAuthenticated_scheduledDeposits() throws Exception {
+        mockMvc.perform(get("/api/recurring/scheduled-deposits"))
+                .andExpect(status().is3xxRedirection());
     }
 }
