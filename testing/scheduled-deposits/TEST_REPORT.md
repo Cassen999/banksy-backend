@@ -27,16 +27,16 @@
 ### Maven Output
 
 ```
-Running org.example.service.RemoveBankServiceTest
-[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.114 s -- in org.example.service.RemoveBankServiceTest
+ Running org.example.service.RemoveBankServiceTest
+[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.101 s -- in org.example.service.RemoveBankServiceTest
 [INFO] Running org.example.service.MonthlyGlanceServiceTest
-[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.811 s -- in org.example.service.MonthlyGlanceServiceTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.257 s -- in org.example.service.MonthlyGlanceServiceTest
 [INFO] Running org.example.service.TransactionsServiceTest
-[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in org.example.service.TransactionsServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.example.service.TransactionsServiceTest
 [INFO] Running org.example.service.NotificationServiceTest
-[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.055 s -- in org.example.service.NotificationServiceTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in org.example.service.NotificationServiceTest
 [INFO] Running org.example.service.PlaidEnvironmentServiceTest
-[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.272 s -- in org.example.service.PlaidEnvironmentServiceTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.137 s -- in org.example.service.PlaidEnvironmentServiceTest
 [INFO] 
 [INFO] Results:
 [INFO] 
@@ -49,8 +49,8 @@ Running org.example.service.RemoveBankServiceTest
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
-[INFO] Total time:  11.173 s
-[INFO] Finished at: 2026-06-15T14:49:29-06:00
+[INFO] Total time:  9.447 s
+[INFO] Finished at: 2026-06-16T12:46:06-06:00
 [INFO] ------------------------------------------------------------------------
 Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
 OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
