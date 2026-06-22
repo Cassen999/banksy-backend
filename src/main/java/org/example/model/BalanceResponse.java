@@ -11,6 +11,8 @@ public record BalanceResponse(List<Account> accounts, List<RelinkSignal> relinkR
             String subtype,
             Double currentBalance,
             Double availableBalance,
-            String currency
+            String currency,
+            String institutionName,
+            String customName
     ) {}
 }

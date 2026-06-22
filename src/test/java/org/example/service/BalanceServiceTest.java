@@ -11,7 +11,9 @@ import org.example.entity.PlaidItemStatus;
 import org.example.entity.User;
 import org.example.model.BalanceResponse;
 import org.example.plaid.PlaidTokenError;
+import org.example.entity.UserAccountName;
 import org.example.repository.PlaidAccountRepository;
+import org.example.repository.UserAccountNameRepository;
 import org.example.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +43,7 @@ class BalanceServiceTest {
     @Mock private EncryptionService encryptionService;
     @Mock private UserRepository userRepository;
     @Mock private PlaidAccountRepository plaidAccountRepository;
+    @Mock private UserAccountNameRepository userAccountNameRepository;
 
     private BalanceService service;
     private final UUID userId = UUID.randomUUID();
@@ -48,7 +51,9 @@ class BalanceServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(plaidEnvService.getClient()).thenReturn(plaidClient);
-        service = new BalanceService(plaidEnvService, encryptionService, userRepository, plaidAccountRepository);
+        lenient().when(userAccountNameRepository.findAllByUserId(any())).thenReturn(List.of());
+        service = new BalanceService(plaidEnvService, encryptionService, userRepository,
+                plaidAccountRepository, userAccountNameRepository);
     }
 
     @Test
@@ -58,6 +63,7 @@ class BalanceServiceTest {
         when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc-token");
         when(item.getId()).thenReturn(UUID.randomUUID());
+        when(item.getInstitutionName()).thenReturn("Chase");
         when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
         when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
@@ -87,6 +93,7 @@ class BalanceServiceTest {
 
         assertThat(result.accounts()).hasSize(1);
         assertThat(result.accounts().get(0).name()).isEqualTo("Checking");
+        assertThat(result.accounts().get(0).institutionName()).isEqualTo("Chase");
         assertThat(result.accounts().get(0).currentBalance()).isEqualTo(1000.0);
         assertThat(result.relinkRequired()).isEmpty();
     }
@@ -250,6 +257,7 @@ class BalanceServiceTest {
         when(healthyItem.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(healthyItem.getAccessTokenEnc()).thenReturn("enc-token");
         when(healthyItem.getId()).thenReturn(UUID.randomUUID());
+        when(healthyItem.getInstitutionName()).thenReturn("Good Bank");
         when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
         when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
@@ -276,6 +284,7 @@ class BalanceServiceTest {
 
         assertThat(result.accounts()).hasSize(1);
         assertThat(result.accounts().get(0).name()).isEqualTo("Savings");
+        assertThat(result.accounts().get(0).institutionName()).isEqualTo("Good Bank");
         assertThat(result.relinkRequired()).hasSize(1);
         assertThat(result.relinkRequired().get(0).institutionName()).isEqualTo("Bad Bank");
     }
@@ -288,6 +297,7 @@ class BalanceServiceTest {
         when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
         when(item.getAccessTokenEnc()).thenReturn("enc-token");
         when(item.getId()).thenReturn(itemId);
+        when(item.getInstitutionName()).thenReturn("Wells Fargo");
         when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
 
         AccountBalance balance = mock(AccountBalance.class);
@@ -323,6 +333,7 @@ class BalanceServiceTest {
 
         assertThat(result.accounts()).hasSize(1);
         assertThat(result.accounts().get(0).name()).isEqualTo("Checking");
+        assertThat(result.accounts().get(0).institutionName()).isEqualTo("Wells Fargo");
     }
 
     @Test
@@ -355,5 +366,50 @@ class BalanceServiceTest {
         BalanceResponse result = service.getBalance(userId);
 
         assertThat(result.accounts()).isEmpty();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldPopulateCustomName_whenUserHasNameEntryForAccount() throws IOException {
+        PlaidItem item = mock(PlaidItem.class);
+        when(item.getStatus()).thenReturn(PlaidItemStatus.HEALTHY);
+        when(item.getAccessTokenEnc()).thenReturn("enc-token");
+        when(item.getId()).thenReturn(UUID.randomUUID());
+        when(item.getInstitutionName()).thenReturn("Chase");
+        when(encryptionService.decrypt("enc-token")).thenReturn("access-token");
+        when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
+
+        AccountBalance balance = mock(AccountBalance.class);
+        when(balance.getCurrent()).thenReturn(500.0);
+        when(balance.getAvailable()).thenReturn(500.0);
+        when(balance.getIsoCurrencyCode()).thenReturn("USD");
+
+        AccountBase account = mock(AccountBase.class);
+        when(account.getAccountId()).thenReturn("acct-xyz");
+        when(account.getName()).thenReturn("Checking");
+        when(account.getType()).thenReturn(null);
+        when(account.getSubtype()).thenReturn(null);
+        when(account.getBalances()).thenReturn(balance);
+
+        AccountsGetResponse body = mock(AccountsGetResponse.class);
+        when(body.getAccounts()).thenReturn(List.of(account));
+
+        Call<AccountsGetResponse> call = mock(Call.class);
+        when(call.execute()).thenReturn(Response.success(body));
+        when(plaidClient.accountsBalanceGet(any())).thenReturn(call);
+
+        User user = mock(User.class);
+        when(user.getPlaidItems()).thenReturn(List.of(item));
+        when(userRepository.findByIdWithPlaidItems(userId)).thenReturn(Optional.of(user));
+
+        UserAccountName nameEntry = new UserAccountName();
+        nameEntry.setPlaidAccountId("acct-xyz");
+        nameEntry.setCustomName("Travel Card");
+        when(userAccountNameRepository.findAllByUserId(userId)).thenReturn(List.of(nameEntry));
+
+        BalanceResponse result = service.getBalance(userId);
+
+        assertThat(result.accounts()).hasSize(1);
+        assertThat(result.accounts().get(0).customName()).isEqualTo("Travel Card");
     }
 }

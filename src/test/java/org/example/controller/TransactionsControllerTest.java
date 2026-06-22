@@ -46,7 +46,7 @@ class TransactionsControllerTest {
     @Test
     void shouldReturnTransactionsResponse_whenAuthenticatedUserCallsEndpoint() throws Exception {
         TransactionsResponse.Transaction tx = new TransactionsResponse.Transaction(
-                LocalDate.now(), "Groceries", 42.50, "USD", List.of("Food"));
+                "acct-abc", LocalDate.now(), "Groceries", 42.50, "USD", List.of("Food"));
         when(transactionsService.getTransactions(any(), eq(30)))
                 .thenReturn(new TransactionsResponse(List.of(tx), 1, List.of()));
 
