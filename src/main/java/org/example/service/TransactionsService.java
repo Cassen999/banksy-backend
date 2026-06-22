@@ -80,7 +80,7 @@ public class TransactionsService {
             response.body().getTransactions().stream()
                     .filter(t -> t.getAccountId() == null || !hiddenIds.contains(t.getAccountId()))
                     .map(t -> new TransactionsResponse.Transaction(
-                            t.getDate(), t.getName(), t.getAmount(),
+                            t.getAccountId(), t.getDate(), t.getName(), t.getAmount(),
                             t.getIsoCurrencyCode(), t.getCategory()))
                     .forEach(allTransactions::add);
         }

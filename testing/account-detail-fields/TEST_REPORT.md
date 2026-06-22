@@ -1,4 +1,4 @@
-# Test Report — scheduled-deposits
+# Test Report — account-detail-fields
 
 ## Summary
 
@@ -28,15 +28,15 @@
 
 ```
  Running org.example.service.RemoveBankServiceTest
-[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.077 s -- in org.example.service.RemoveBankServiceTest
+[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.079 s -- in org.example.service.RemoveBankServiceTest
 [INFO] Running org.example.service.MonthlyGlanceServiceTest
-[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.224 s -- in org.example.service.MonthlyGlanceServiceTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.225 s -- in org.example.service.MonthlyGlanceServiceTest
 [INFO] Running org.example.service.TransactionsServiceTest
-[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in org.example.service.TransactionsServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in org.example.service.TransactionsServiceTest
 [INFO] Running org.example.service.NotificationServiceTest
-[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.046 s -- in org.example.service.NotificationServiceTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in org.example.service.NotificationServiceTest
 [INFO] Running org.example.service.PlaidEnvironmentServiceTest
-[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.120 s -- in org.example.service.PlaidEnvironmentServiceTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.125 s -- in org.example.service.PlaidEnvironmentServiceTest
 [INFO] 
 [INFO] Results:
 [INFO] 
@@ -49,15 +49,15 @@
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
-[INFO] Total time:  7.380 s
-[INFO] Finished at: 2026-06-22T14:17:35-06:00
+[INFO] Total time:  8.116 s
+[INFO] Finished at: 2026-06-22T14:39:23-06:00
 [INFO] ------------------------------------------------------------------------
 Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
-OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
 WARNING: A Java agent has been loaded dynamically (/Users/hannahgerber/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.6/byte-buddy-agent-1.17.6.jar)
 WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
 WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
 WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
 WARNING: Final field securityContextRepository in class org.springframework.security.web.context.SecurityContextHolderFilter has been mutated reflectively by class org.springframework.util.ReflectionUtils in unnamed module @3e3047e6 (file:/Users/hannahgerber/.m2/repository/org/springframework/spring-core/6.2.8/spring-core-6.2.8.jar)
 WARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning
 WARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled

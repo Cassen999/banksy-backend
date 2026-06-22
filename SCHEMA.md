@@ -97,6 +97,16 @@
 │ category_type                  │
 │ primary_category               │
 └────────────────────────────────┘
+
+┌────────────────────────────────┐
+│      user_account_names        │  ← per-user custom account display names
+├────────────────────────────────┤
+│ id (PK)                        │
+│ user_id (FK → users)           │
+│ plaid_account_id               │
+│ custom_name                    │
+│ created_at                     │
+└────────────────────────────────┘
 ```
 
 ---
@@ -277,6 +287,21 @@ Read-only lookup table of all 146 Plaid PFCv2 taxonomy entries. Seeded once by `
 
 ---
 
+### `user_account_names`
+Per-user custom display names for linked bank accounts. Allows a user to override the default label (institution name + account subtype) with a personal name. Written via `PUT /api/plaid/account/{plaidAccountId}/name` and deleted via `DELETE /api/plaid/account/{plaidAccountId}/name`. Surfaced in `GET /api/balance` as the `customName` field (null when absent).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK, default `gen_random_uuid()` | Record identifier |
+| `user_id` | `UUID` | NOT NULL, FK → `users.id` (CASCADE) | The user who set this name |
+| `plaid_account_id` | `VARCHAR(255)` | NOT NULL | Plaid-assigned account ID string (matches `plaid_accounts.plaid_account_id`) |
+| `custom_name` | `VARCHAR(255)` | NOT NULL | User-set display name |
+| `created_at` | `TIMESTAMP` | NOT NULL, default `now()` | When the custom name was first set |
+
+**Unique constraint:** `(user_id, plaid_account_id)` — one custom name per account per user.
+
+---
+
 ## Key Relationships Summary
 
 ```
@@ -292,7 +317,8 @@ users (1) ──────────────── (N) oauth_identities
   │
   ├── (1) ──────────────── (N) notifications
   ├── (1) ──────────────── (N) user_rejected_categories
-  └── (1) ──────────────── (N) user_excluded_accounts
+  ├── (1) ──────────────── (N) user_excluded_accounts
+  └── (1) ──────────────── (N) user_account_names
 
 plaid_environment_config  ← singleton (id=1)
 plaid_categories          ← read-only taxonomy (146 rows, no FK)
@@ -303,3 +329,4 @@ plaid_categories          ← read-only taxonomy (146 rows, no FK)
 - Hiding an account (`hidden = true`) is per-account, not per-item; any linked user can hide.
 - Removing an item (`DELETE /api/plaid/item/{id}`) cascades: deletes the item, all its accounts, and all `user_plaid_items` rows, then notifies every previously linked user.
 - `user_rejected_categories` and `user_excluded_accounts` are per-user settings for `GET /api/monthly-glance` filtering; they cascade on user delete.
+- `user_account_names` stores per-user custom labels for accounts; surfaced as `customName` in `GET /api/balance`; cascade on user delete.

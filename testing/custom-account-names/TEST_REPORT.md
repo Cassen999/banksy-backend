@@ -1,17 +1,17 @@
-# Test Report — scheduled-deposits
+# Test Report — custom-account-names
 
 ## Summary
 
 | Check | Result |
 |-------|--------|
 | Tests | PASS |
-| Line Coverage | 98.2% (PASS) |
-| Branch Coverage | 93.8% (PASS) |
+| Line Coverage | 98.3% (PASS) |
+| Branch Coverage | 93.9% (PASS) |
 
 ## Coverage Results
 
-- **Line coverage:** 98.2% (threshold: 90.0%)
-- **Branch coverage:** 93.8% (threshold: 90.0%)
+- **Line coverage:** 98.3% (threshold: 90.0%)
+- **Branch coverage:** 93.9% (threshold: 90.0%)
 
 ### Classes Below Threshold
 
@@ -27,30 +27,30 @@
 ### Maven Output
 
 ```
- Running org.example.service.RemoveBankServiceTest
-[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.077 s -- in org.example.service.RemoveBankServiceTest
-[INFO] Running org.example.service.MonthlyGlanceServiceTest
-[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.224 s -- in org.example.service.MonthlyGlanceServiceTest
+e.service.MonthlyGlanceServiceTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.221 s -- in org.example.service.MonthlyGlanceServiceTest
 [INFO] Running org.example.service.TransactionsServiceTest
-[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in org.example.service.TransactionsServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.example.service.TransactionsServiceTest
+[INFO] Running org.example.service.AccountCustomizationServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.example.service.AccountCustomizationServiceTest
 [INFO] Running org.example.service.NotificationServiceTest
-[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.046 s -- in org.example.service.NotificationServiceTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in org.example.service.NotificationServiceTest
 [INFO] Running org.example.service.PlaidEnvironmentServiceTest
-[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.120 s -- in org.example.service.PlaidEnvironmentServiceTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.127 s -- in org.example.service.PlaidEnvironmentServiceTest
 [INFO] 
 [INFO] Results:
 [INFO] 
-[WARNING] Tests run: 220, Failures: 0, Errors: 0, Skipped: 33
+[WARNING] Tests run: 243, Failures: 0, Errors: 0, Skipped: 39
 [INFO] 
 [INFO] 
 [INFO] --- jacoco:0.8.12:report (report) @ banksy ---
 [INFO] Loading execution data file /Users/hannahgerber/IdeaProjects/banksy/target/jacoco.exec
-[INFO] Analyzed bundle 'banksy' with 37 classes
+[INFO] Analyzed bundle 'banksy' with 40 classes
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
-[INFO] Total time:  7.380 s
-[INFO] Finished at: 2026-06-22T14:17:35-06:00
+[INFO] Total time:  7.721 s
+[INFO] Finished at: 2026-06-22T15:03:48-06:00
 [INFO] ------------------------------------------------------------------------
 Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
 OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended

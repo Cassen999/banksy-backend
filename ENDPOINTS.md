@@ -119,7 +119,9 @@ GET /api/balance
       "subtype": "checking",
       "currentBalance": 1500.00,
       "availableBalance": 1400.00,
-      "currency": "USD"
+      "currency": "USD",
+      "institutionName": "Chase",
+      "customName": null
     }
   ],
   "relinkRequired": []
@@ -127,6 +129,8 @@ GET /api/balance
 ```
 
 - `accountId` — Plaid's account identifier (`plaid_account_id` in the DB); use this when requesting per-account data (e.g. recurring transactions).
+- `institutionName` — human-readable bank name (e.g. `"Chase"`).
+- `customName` — user-set display name, or `null` if none has been set. Set via `PUT /api/plaid/account/{plaidAccountId}/name`.
 - `accounts` — only includes accounts from HEALTHY items with `hidden = false`.
 - `relinkRequired` — one entry per non-HEALTHY item the user has linked.
 
@@ -162,6 +166,7 @@ GET /api/transactions?days=90   // optional; defaults to 30
 {
   "transactions": [
     {
+      "accountId": "BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp",
       "date": "2026-05-15",
       "name": "Starbucks",
       "amount": 5.75,
@@ -174,6 +179,7 @@ GET /api/transactions?days=90   // optional; defaults to 30
 }
 ```
 
+- `accountId` — Plaid's account identifier; matches `accountId` on the balance response so you can filter transactions per account.
 - `amount` — positive = money leaving the account (debit); negative = money entering (credit). This is Plaid's native convention.
 - `date` — ISO-8601 date string (`YYYY-MM-DD`).
 - `category` — Plaid's hierarchical category list; may be empty.
@@ -496,6 +502,70 @@ Shares one of the current user's bank connections with another user by email. On
 | `400` | `{ "error": "..." }` | Target user not found, item not found, or item already shared with that user |
 | `403` | `{ "error": "..." }` | Caller is not the owner of this item |
 | `500` | — | Unexpected server error (empty body) |
+
+---
+
+## Account Customization
+
+### `PUT /api/plaid/account/{plaidAccountId}/name`
+Sets or updates a custom display name for a linked account. Any linked user (owner or shared) may call this. Calling again with a different name replaces the existing value (upsert).
+
+**Auth required:** Yes  
+**Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `plaidAccountId` | `string` | Plaid-assigned account ID (`accountId` from `GET /api/balance`) |
+
+**Body:**
+```json
+{ "customName": "Travel Card" }
+```
+
+**Success `200`:**
+```json
+{ "status": "ok" }
+```
+
+**Failures:**
+
+| Status | Body | Condition |
+|--------|------|-----------|
+| `302` | — | No active session |
+| `404` | `{ "error": "..." }` | Account not found in the database |
+| `403` | `{ "error": "..." }` | Caller is not linked to the account's item |
+| `500` | `{ "error": "..." }` | Unexpected server error |
+
+---
+
+### `DELETE /api/plaid/account/{plaidAccountId}/name`
+Removes a custom display name, reverting the account to its default label on the frontend. Idempotent — no error if no custom name exists.
+
+**Auth required:** Yes  
+**Path params:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `plaidAccountId` | `string` | Plaid-assigned account ID (`accountId` from `GET /api/balance`) |
+
+**Call:**
+```js
+DELETE /api/plaid/account/{plaidAccountId}/name
+// No body
+```
+
+**Success `200`:**
+```json
+{ "status": "ok" }
+```
+
+**Failures:**
+
+| Status | Body | Condition |
+|--------|------|-----------|
+| `302` | — | No active session |
+| `404` | `{ "error": "..." }` | Account not found in the database |
+| `403` | `{ "error": "..." }` | Caller is not linked to the account's item |
 
 ---
 

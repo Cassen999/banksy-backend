@@ -63,6 +63,7 @@ class TransactionsServiceTest {
         when(plaidAccountRepository.findHiddenAccountIdsByItemId(any())).thenReturn(Set.of());
 
         Transaction tx = mock(Transaction.class);
+        when(tx.getAccountId()).thenReturn("acct-123");
         when(tx.getDate()).thenReturn(LocalDate.now());
         when(tx.getName()).thenReturn("Coffee Shop");
         when(tx.getAmount()).thenReturn(4.50);
@@ -83,6 +84,7 @@ class TransactionsServiceTest {
         TransactionsResponse result = service.getTransactions(userId, 30);
 
         assertThat(result.transactions()).hasSize(1);
+        assertThat(result.transactions().get(0).accountId()).isEqualTo("acct-123");
         assertThat(result.transactions().get(0).name()).isEqualTo("Coffee Shop");
         assertThat(result.total()).isEqualTo(1);
         assertThat(result.relinkRequired()).isEmpty();
@@ -273,6 +275,7 @@ class TransactionsServiceTest {
         TransactionsResponse result = service.getTransactions(userId, 30);
 
         assertThat(result.transactions()).hasSize(1);
+        assertThat(result.transactions().get(0).accountId()).isEqualTo("acct-visible");
         assertThat(result.transactions().get(0).name()).isEqualTo("Grocery Store");
         assertThat(result.total()).isEqualTo(1);
     }

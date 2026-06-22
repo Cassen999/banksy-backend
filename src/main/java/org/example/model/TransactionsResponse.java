@@ -6,6 +6,7 @@ import java.util.List;
 public record TransactionsResponse(List<Transaction> transactions, int total, List<RelinkSignal> relinkRequired) {
 
     public record Transaction(
+            String accountId,
             LocalDate date,
             String name,
             Double amount,

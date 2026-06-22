@@ -42,7 +42,7 @@ class BalanceControllerTest {
     @Test
     void shouldReturnBalanceResponse_whenAuthenticatedUserCallsEndpoint() throws Exception {
         BalanceResponse.Account account = new BalanceResponse.Account(
-                "acc_123", "Checking", "depository", "checking", 1500.0, 1400.0, "USD");
+                "acc_123", "Checking", "depository", "checking", 1500.0, 1400.0, "USD", "Chase", null);
         when(balanceService.getBalance(any())).thenReturn(new BalanceResponse(List.of(account), List.of()));
 
         mockMvc.perform(get("/api/balance")
